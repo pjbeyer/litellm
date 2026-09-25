@@ -11,7 +11,8 @@ COUNT_TOKENS_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemi
 
 
 @pytest.mark.asyncio
-async def test_acount_tokens_sends_generate_content_request_when_system_or_tools_present():
+async def test_acount_tokens_sends_generate_content_request_when_system_or_tools_present(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_BASE", raising=False)
     recorded: list[httpx.Request] = []
 
     def _handler(request: httpx.Request) -> httpx.Response:

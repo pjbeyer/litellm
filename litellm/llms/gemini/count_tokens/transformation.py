@@ -3,10 +3,9 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, TypedDict, cast
+from typing import Final, cast
 
 from pydantic import TypeAdapter
-from typing_extensions import ReadOnly
 
 from litellm.llms.anthropic.common_utils import sanitize_replayed_anthropic_messages
 from litellm.llms.anthropic.experimental_pass_through.adapters.transformation import AnthropicAdapter
@@ -275,65 +274,3 @@ def build_count_tokens_payload(
         return _build_openai_payload(model=model, messages=messages, system=system, tools=tools)
     except Exception as e:  # noqa: BLE001  # translation is pure; any failure is untranslatable input
         return InvalidCountTokensRequest(message=f"Invalid token count request: {e!r}")
-
-
-_INLINE_DATA_BASE64_RE: Final = re.compile(r"[A-Za-z0-9+/=]{16,}")
-
-
-def _elide_data_key(obj: Mapping[str, object]) -> Mapping[str, object]:
-    return {  # mutable-ok: object_hook contract returns a dict per JSON node
-        key: (
-            "<binary>"
-            if key == "data" and isinstance(value, str) and _INLINE_DATA_BASE64_RE.fullmatch(value)
-            else value
-        )
-        for key, value in obj.items()
-    }
-
-
-def _serialize_part(part: object) -> str:
-    return json.dumps(json.loads(json.dumps(part, default=str), object_hook=_elide_data_key), default=str)
-
-
-def _part_to_text(part: object) -> str:
-    if isinstance(part, Mapping) and isinstance(part.get("text"), str):
-        return part["text"]
-    return _serialize_part(part)
-
-
-def _content_parts(content: Mapping[str, object]) -> tuple[object, ...]:
-    parts: Final = content.get("parts")
-    if isinstance(parts, list):
-        return tuple(parts)
-    return (content,)
-
-
-class _LocalCountMessage(TypedDict):
-    role: ReadOnly[str]
-    content: ReadOnly[str]
-
-
-def _local_count_message(role: str, content: str) -> _LocalCountMessage:
-    message: Final[_LocalCountMessage] = {"role": role, "content": content}
-    return message
-
-
-def gemini_contents_as_chat_messages(contents: object) -> tuple[Mapping[str, object], ...] | None:
-    if contents is None:
-        return None
-    if isinstance(contents, list):
-        messages: Final = tuple(
-            _local_count_message(
-                role="assistant" if content.get("role") == "model" else "user",
-                content="\n".join(_part_to_text(part) for part in _content_parts(content)),
-            )
-            for content in contents
-            if isinstance(content, Mapping)
-        )
-        counted: Final = tuple(message for message in messages if message["content"])
-        if counted:
-            return counted
-    fallback: Final[tuple[Mapping[str, object], ...]] = (
-        _local_count_message(role="user", content=_serialize_part(contents)),
-    )
-    return fallback

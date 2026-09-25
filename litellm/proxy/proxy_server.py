@@ -13500,8 +13500,8 @@ async def run_thread(
 #     dependencies=[Depends(user_api_key_auth)],
 # )
 # async def get_available_routes(user_api_key_dict: UserAPIKeyAuth = Depends(user_api_key_auth)):
+from litellm.litellm_core_utils.token_counter import gemini_contents_as_chat_messages
 from litellm.llms.base_llm.base_utils import BaseTokenCounter
-from litellm.llms.gemini.count_tokens.transformation import gemini_contents_as_chat_messages
 from litellm.proxy.db.routing_prisma_wrapper import WriterPinnedClient
 from litellm.repositories.config_repository import ConfigRepository
 from litellm.repositories.model_repository import ModelRepository
