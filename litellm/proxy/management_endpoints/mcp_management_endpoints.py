@@ -1333,7 +1333,7 @@ if MCP_AVAILABLE:
 
         auth_contexts: Final = await build_effective_auth_contexts(user_api_key_dict)
 
-        server_status_map: Final[dict[str, Literal["healthy", "unhealthy", "unknown"] | None]] = {}
+        server_status_map: Final[dict[str, Literal["healthy", "reachable", "unhealthy", "unknown"] | None]] = {}
         for auth_context in auth_contexts:
             servers = await global_mcp_server_manager.get_all_mcp_servers_with_health_and_teams(
                 user_api_key_auth=auth_context,

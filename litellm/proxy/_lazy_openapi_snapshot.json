@@ -32168,6 +32168,7 @@
                 {
                   "enum": [
                     "healthy",
+                    "reachable",
                     "unhealthy",
                     "unknown"
                   ],
@@ -32178,7 +32179,7 @@
                 }
               ],
               "default": "unknown",
-              "description": "Health status: 'healthy', 'unhealthy', 'unknown'",
+              "description": "Health status: 'healthy', 'reachable' (HTTP response; authentication and tools unchecked), 'unhealthy', 'unknown'",
               "title": "Status"
             },
             "subject_token_type": {
@@ -35224,6 +35225,7 @@
                 {
                   "enum": [
                     "healthy",
+                    "reachable",
                     "unhealthy",
                     "unknown"
                   ],
@@ -35234,7 +35236,7 @@
                 }
               ],
               "default": "unknown",
-              "description": "Health status: 'healthy', 'unhealthy', 'unknown'",
+              "description": "Health status: 'healthy', 'reachable' (HTTP response; authentication and tools unchecked), 'unhealthy', 'unknown'",
               "title": "Status"
             },
             "subject_token_type": {

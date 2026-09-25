@@ -32494,10 +32494,10 @@ export interface components {
             } | null;
             /**
              * Status
-             * @description Health status: 'healthy', 'unhealthy', 'unknown'
+             * @description Health status: 'healthy', 'reachable' (HTTP response; authentication and tools unchecked), 'unhealthy', 'unknown'
              * @default unknown
              */
-            status: ("healthy" | "unhealthy" | "unknown") | null;
+            status: ("healthy" | "reachable" | "unhealthy" | "unknown") | null;
             /** Subject Token Type */
             subject_token_type?: string | null;
             /** Submitted At */
