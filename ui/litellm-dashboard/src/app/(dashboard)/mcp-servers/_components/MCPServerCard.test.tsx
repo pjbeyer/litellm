@@ -112,3 +112,18 @@ describe("MCPServerCard per-user credentials", () => {
     expect(screen.queryByRole("button", { name: "Set" })).not.toBeInTheDocument();
   });
 });
+
+describe("MCPServerCard hub listing", () => {
+  it.each([
+    { listed: true, publicIp: false },
+    { listed: false, publicIp: true },
+  ])("separates hub listing $listed from public IP setting $publicIp", ({ listed, publicIp }) => {
+    renderCard({
+      available_on_public_internet: publicIp,
+      mcp_info: { server_name: "demo_server", is_public: listed },
+    });
+
+    expect(screen.getByText(listed ? "Hub: Listed" : "Hub: Unlisted")).toBeInTheDocument();
+    expect(screen.getByText(`Public IP setting: ${publicIp ? "Enabled" : "Disabled"}`)).toBeInTheDocument();
+  });
+});

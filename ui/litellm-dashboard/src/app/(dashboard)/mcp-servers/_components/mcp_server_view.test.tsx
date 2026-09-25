@@ -120,14 +120,21 @@ describe("MCPServerView", () => {
   });
 
   it("shows the read-only settings summary before editing", async () => {
-    renderView({ allow_all_keys: true, available_on_public_internet: false });
+    renderView({
+      allow_all_keys: true,
+      available_on_public_internet: false,
+      mcp_info: { server_name: "demo server", is_public: true },
+    });
 
     await userEvent.click(screen.getByRole("tab", { name: "Settings" }));
 
     expect(await screen.findByText("MCP Server Settings")).toBeInTheDocument();
     expect(screen.getByText("Allow All Keys")).toBeInTheDocument();
     expect(screen.getByText("Enabled")).toBeInTheDocument();
-    expect(screen.getByText("Internal only")).toBeInTheDocument();
+    expect(screen.getByText("Public IP setting")).toBeInTheDocument();
+    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.getByText("MCP Hub")).toBeInTheDocument();
+    expect(screen.getByText("Listed")).toBeInTheDocument();
     expect(screen.queryByText("edit form")).not.toBeInTheDocument();
   });
 

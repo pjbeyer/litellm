@@ -318,19 +318,29 @@ export const MCPServerView: React.FC<MCPServerViewProps> = ({
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-4 py-3">
-                  <p className="text-sm font-medium text-muted-foreground">Network Access</p>
+                  <p className="text-sm font-medium text-muted-foreground">MCP Hub</p>
+                  <div className="col-span-2">
+                    <Badge variant="outline">{mcpServer.mcp_info?.is_public === true ? "Listed" : "Unlisted"}</Badge>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4 py-3">
+                  <p className="text-sm font-medium text-muted-foreground">Public IP setting</p>
                   <div className="col-span-2">
                     {mcpServer.available_on_public_internet ? (
                       <Badge variant="outline">
                         <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                        Public
+                        Enabled
                       </Badge>
                     ) : (
                       <Badge variant="outline">
                         <span className="h-1.5 w-1.5 rounded-full bg-warning" />
-                        Internal only
+                        Disabled
                       </Badge>
                     )}
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Explicitly published server IDs also allow requests from public IPs. Authentication and access
+                      permissions still apply
+                    </p>
                   </div>
                 </div>
                 {handleAuth(mcpServer.auth_type) === "oauth2" && (

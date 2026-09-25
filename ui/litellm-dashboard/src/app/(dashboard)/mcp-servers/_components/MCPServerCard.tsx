@@ -69,7 +69,8 @@ const MCPServerCard: FC<MCPServerCardProps> = ({
     server.auth_type === AUTH_TYPE.OAUTH2 && !server.oauth2_flow && !server.delegate_auth_to_upstream;
   const status = server.status || "unknown";
   const healthTone = HEALTH_TONE[status] ?? HEALTH_TONE.unknown;
-  const isPublic = server.available_on_public_internet;
+  const isListedInHub = server.mcp_info?.is_public === true;
+  const publicIpEnabled = server.available_on_public_internet;
   const accessGroups = (server.mcp_access_groups ?? []).filter((g): g is string => typeof g === "string");
 
   const missing = missingUserFields ?? [];
@@ -235,10 +236,21 @@ const MCPServerCard: FC<MCPServerCardProps> = ({
               </TooltipContent>
             </Tooltip>
           )}
-          <Badge variant="outline">
-            <span className={cn("h-1.5 w-1.5 rounded-full", isPublic ? "bg-success" : "bg-warning")} />
-            {isPublic ? "Public" : "Internal"}
-          </Badge>
+          <Badge variant="outline">{isListedInHub ? "Hub: Listed" : "Hub: Unlisted"}</Badge>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Badge variant="outline">
+                  <span className={cn("h-1.5 w-1.5 rounded-full", publicIpEnabled ? "bg-success" : "bg-warning")} />
+                  Public IP setting: {publicIpEnabled ? "Enabled" : "Disabled"}
+                </Badge>
+              }
+            />
+            <TooltipContent>
+              Explicitly published server IDs also allow requests from public IPs. Authentication and access permissions
+              still apply
+            </TooltipContent>
+          </Tooltip>
           {accessGroups.slice(0, 2).map((g) => (
             <Tooltip key={g}>
               <TooltipTrigger
