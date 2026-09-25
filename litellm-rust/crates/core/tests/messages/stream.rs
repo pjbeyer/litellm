@@ -88,7 +88,7 @@ fn sse_response() -> ResponseTemplate {
 }
 
 async fn stream_through(host: &RecordingStreamHost) -> Result<MessagesOutput, Error> {
-    litellm_host::run::run(messages_machine(Arc::new(RecordingSecrets::empty())), host).await
+    litellm_host::run::run(machine(Arc::new(RecordingSecrets::empty())), host).await
 }
 
 fn delivered_bytes(chunks: &[Seen]) -> Vec<u8> {
@@ -305,8 +305,7 @@ async fn streaming_is_refused_for_providers_that_cannot_stream(call: MessagesCal
 async fn the_local_host_refuses_a_stream(call: MessagesCall) {
     let upstream = upstream([sse_response()]).await;
     let host = LocalMessagesHost::new(streaming(call, upstream.uri()));
-    let result =
-        litellm_host::run::run(messages_machine(Arc::new(RecordingSecrets::empty())), &host).await;
+    let result = litellm_host::run::run(machine(Arc::new(RecordingSecrets::empty())), &host).await;
     assert!(matches!(
         result,
         Err(Error::Unsupported(

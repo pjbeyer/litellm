@@ -7,15 +7,15 @@ use litellm_types::llms::anthropic_messages::anthropic_response::AnthropicMessag
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::Value;
 
-use super::{
-    Error, client::http_client, common_utils::truncate_error_body, types::MessagesProvider,
-};
+use super::{Error, common_utils::truncate_error_body, types::MessagesProvider};
+use crate::constants::MESSAGES_TIMEOUT_SECS;
 
 pub(super) fn network(error: reqwest::Error) -> Error {
     Error::Transport(TransportError::Network(error.to_string()))
 }
 
 pub(super) async fn send(
+    http: &reqwest::Client,
     url: &str,
     headers: &[(String, String)],
     body: &Value,
@@ -23,13 +23,11 @@ pub(super) async fn send(
 ) -> Result<reqwest::Response, Error> {
     let encoded = serde_json::to_vec(body).map_err(|e| Error::RequestEncoding(e.into()))?;
     let builder = headers.iter().fold(
-        http_client().post(url).body(encoded),
+        http.post(url)
+            .body(encoded)
+            .timeout(timeout.unwrap_or(Duration::from_secs(MESSAGES_TIMEOUT_SECS))),
         |builder, (key, value)| builder.header(key, value),
     );
-    let builder = match timeout {
-        Some(duration) => builder.timeout(duration),
-        None => builder,
-    };
     http_request(builder).await.map_err(network)
 }
 

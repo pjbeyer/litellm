@@ -5,9 +5,6 @@ pub const OPENAI_DEFAULT_API_BASE: &str = "https://api.openai.com";
 /// timeout from the caller still overrides this on the request builder.
 pub(crate) const MESSAGES_TIMEOUT_SECS: u64 = 600;
 
-/// Connect timeout for Anthropic Messages provider calls, in seconds.
-pub(crate) const MESSAGES_CONNECT_TIMEOUT_SECS: u64 = 10;
-
 /// Full-request timeout ceiling for chat completions provider calls, in
 /// seconds. Mirrors the Python chat completions default.
 pub(crate) const CHAT_COMPLETIONS_TIMEOUT_SECS: u64 = 600;

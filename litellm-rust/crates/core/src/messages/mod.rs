@@ -7,20 +7,24 @@
 mod error;
 pub mod types;
 pub use error::{Error, JsonError};
-mod client;
 mod common_utils;
 mod handler;
 mod prepare;
 pub mod route;
 use std::sync::Arc;
 
+use litellm_http::{HttpClientConfig, HttpClientPool};
 use litellm_secrets::source::EnvironmentSecrets;
 use litellm_types::llms::anthropic_messages::anthropic_response::AnthropicMessagesResponse;
 use route::{LocalMessagesHost, MessagesCall, MessagesOutput, messages_machine};
 
 use crate::messages::types::MessagesRequest;
 
-pub async fn messages(request: MessagesRequest<'_>) -> Result<AnthropicMessagesResponse, Error> {
+pub async fn messages(
+    pool: &HttpClientPool,
+    config: &HttpClientConfig,
+    request: MessagesRequest<'_>,
+) -> Result<AnthropicMessagesResponse, Error> {
     let call = MessagesCall {
         model: request.model.into(),
         body: request.body,
@@ -33,7 +37,12 @@ pub async fn messages(request: MessagesRequest<'_>) -> Result<AnthropicMessagesR
         shaping: request.shaping,
     };
     let secrets = Arc::new(EnvironmentSecrets::python_compatible());
-    match litellm_host::run::run(messages_machine(secrets), &LocalMessagesHost::new(call)).await? {
+    match litellm_host::run::run(
+        messages_machine(pool, config, secrets)?,
+        &LocalMessagesHost::new(call),
+    )
+    .await?
+    {
         MessagesOutput::Message(message) => Ok(*message),
         MessagesOutput::Streamed => Err(Error::Unsupported(
             "streamed responses need a streaming host",
