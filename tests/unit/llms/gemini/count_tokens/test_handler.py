@@ -63,6 +63,49 @@ async def test_acount_tokens_keeps_contents_body_without_system_or_tools():
 
 
 @pytest.mark.asyncio
+async def test_acount_tokens_uses_gemini_api_base_env_when_no_api_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_BASE", "https://gateway.example.com")
+    recorded: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        recorded.append(request)
+        return httpx.Response(200, json={"totalTokens": 4})
+
+    await GoogleAIStudioTokenCounter().acount_tokens(
+        model="gemini-2.5-flash",
+        contents=[{"role": "user", "parts": [{"text": "hi"}]}],
+        api_key="test-key",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(_handler)),
+    )
+
+    assert (
+        str(recorded[-1].url) == "https://gateway.example.com/v1beta/models/gemini-2.5-flash:countTokens"
+    ), recorded[-1].url
+
+
+@pytest.mark.asyncio
+async def test_acount_tokens_prefers_explicit_api_base_over_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_BASE", "https://gateway.example.com")
+    recorded: list[httpx.Request] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        recorded.append(request)
+        return httpx.Response(200, json={"totalTokens": 4})
+
+    await GoogleAIStudioTokenCounter().acount_tokens(
+        model="gemini-2.5-flash",
+        contents=[{"role": "user", "parts": [{"text": "hi"}]}],
+        api_key="test-key",
+        api_base="https://explicit.example.com",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(_handler)),
+    )
+
+    assert (
+        str(recorded[-1].url) == "https://explicit.example.com/v1beta/models/gemini-2.5-flash:countTokens"
+    ), recorded[-1].url
+
+
+@pytest.mark.asyncio
 async def test_acount_tokens_sends_generate_content_request_with_system_only():
     recorded: list[httpx.Request] = []
 
