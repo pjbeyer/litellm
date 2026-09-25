@@ -8,10 +8,6 @@ pub(crate) const MESSAGES_TIMEOUT_SECS: u64 = 600;
 /// Connect timeout for Anthropic Messages provider calls, in seconds.
 pub(crate) const MESSAGES_CONNECT_TIMEOUT_SECS: u64 = 10;
 
-/// Provider name used for Anthropic Messages when a deployment's provider model
-/// does not carry an explicit provider prefix.
-pub const ANTHROPIC_MESSAGES_PROVIDER: &str = "anthropic";
-
 /// Full-request timeout ceiling for chat completions provider calls, in
 /// seconds. Mirrors the Python chat completions default.
 pub(crate) const CHAT_COMPLETIONS_TIMEOUT_SECS: u64 = 600;
