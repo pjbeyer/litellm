@@ -48,6 +48,7 @@ RoutingStrategyName: TypeAlias = Literal[
     "lar1",
 ]
 
+CONTROL_PARAMS_KEY: Final = "_litellm_control"
 TRUSTED_CALLBACK_VARS_FIELD: Final = "litellm_trusted_callback_vars"
 ADDRESSED_RESPONSE_ID_FIELD: Final = "_litellm_addressed_response_id"
 

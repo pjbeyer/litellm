@@ -378,13 +378,10 @@ def test_router_deployment_stream_chunk_size_reaches_iter_bytes(
     assert recorder.seen[0]["stream_chunk_size"] == stream_chunk_size
 
 
-def test_stream_wrapper_rejects_non_int_stream_chunk_size(monkeypatch: pytest.MonkeyPatch):
+def test_invoke_stream_rejects_non_int_stream_chunk_size_before_calling_bedrock(monkeypatch: pytest.MonkeyPatch):
     record_litellm_params(monkeypatch)
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.iter_bytes = MagicMock(return_value=iter([]))
     client = HTTPHandler()
-    client.post = MagicMock(return_value=mock_response)
+    client.post = MagicMock()
 
     with pytest.raises(litellm.BadRequestError):
         litellm.completion(
