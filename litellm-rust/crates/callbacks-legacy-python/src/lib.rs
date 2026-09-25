@@ -20,7 +20,7 @@ pub(crate) use adapter::LegacyLogging;
 pub use adapter::{LegacySurface, PassThroughStream};
 pub use call::{PublicCall, run_legacy_call};
 pub(crate) use callbacks::{LegacyCallbacks, is_internal_call};
-pub(crate) use logger::{CallbackHooks, PythonLogger, finalize, setup};
+pub(crate) use logger::{DeploymentHooks, MessagesHandler, PythonLogger, finalize, setup};
 pub(crate) use preparation::prepare;
 
 #[cfg(test)]
@@ -106,12 +106,14 @@ FAKES = {
     'is_internal_call': lambda: legacy.is_internal.get(),
     'credential_list': lambda: [],
     'warn_unknown_credential': lambda name, loaded: None,
-    'pre_request_hooks': lambda model, messages, kwargs: kwargs['logger'].pre_request(model, messages, kwargs),
-    'before_deployment_call': lambda logger, kwargs, call_type: kwargs['logger'].hook('pre', kwargs, call_type),
-    'after_deployment_success': lambda kwargs, response, call_type: kwargs['logger'].hook(
+    'execute_pre_request_hooks': lambda model, messages, kwargs: kwargs['logger'].pre_request(model, messages, kwargs),
+    'async_pre_call_deployment_hook': lambda logger, kwargs, call_type: kwargs['logger'].hook('pre', kwargs, call_type),
+    'async_post_call_success_deployment_hook': lambda kwargs, response, call_type: kwargs['logger'].hook(
         'success', response, call_type
     ),
-    'after_deployment_failure': lambda kwargs, error, call_type: kwargs['logger'].hook('failure', error, call_type),
+    'async_post_call_failure_deployment_hook': lambda kwargs, error, call_type: kwargs['logger'].hook(
+        'failure', error, call_type
+    ),
     'stream_opened': lambda logger: logger.record('stream_opened', None),
     'stream_success': lambda logger, request_body, chunks, start, end, first_chunk: logger.record(
         'stream_success', list(chunks)
