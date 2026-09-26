@@ -1,0 +1,19 @@
+tests/test_litellm/completion_extras/test_responses_bridge_boundary_delta.py
+  s_f154c0b68c7fcf::t_0cad33d3b62f80 1-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "a01ac339965d3f082a547f65f48fbfb5438677e0",
+  "prompts": {},
+  "sessions": {
+    "s_f154c0b68c7fcf": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20260925_143329_369bf2",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
