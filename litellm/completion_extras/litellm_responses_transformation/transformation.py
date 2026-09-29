@@ -1585,6 +1585,7 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         self._chat_completion_id: str | None = None
         self._served_service_tier: str | None = None
         self._tool_call_index_map: dict[int, int] = {}  # mutable-ok: per-stream accumulator state
+        self._args_already_complete: set[int] = set()  # mutable-ok: per-stream accumulator state
 
     def _handle_string_chunk(
         self, str_line: Union[str, "BaseModel"]
@@ -1625,6 +1626,7 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
     def translate_responses_chunk_to_openai_stream(
         parsed_chunk: dict | BaseModel,
         tool_call_index_map: dict[int, int] | None = None,  # mutable-ok: per-stream state, remapped in place
+        args_already_complete: set[int] | None = None,  # mutable-ok: per-stream state, output_index with full args on added
     ) -> "ModelResponseStream":
         """
         Translate a Responses API streaming chunk to OpenAI chat completion streaming format.
@@ -1692,6 +1694,11 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                     name=converted["function"]["name"] or None,
                     arguments=converted["function"]["arguments"] or parsed_chunk.get("arguments") or "",
                 )
+                # A gateway may put the complete arguments on the added event and
+                # also stream the identical payload as deltas. Forwarding both makes
+                # the client concatenate two copies, so remember the completed item.
+                if args_already_complete is not None and converted["function"]["arguments"]:
+                    args_already_complete.add(parsed_chunk.get("output_index", 0))
                 if provider_specific_fields:
                     function_chunk["provider_specific_fields"] = provider_specific_fields
 
@@ -1721,6 +1728,13 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
             ResponsesAPIStreamEvents.CUSTOM_TOOL_CALL_INPUT_DELTA,
         ):
             content_part: str | None = parsed_chunk.get("delta", None)
+            if (content_part and args_already_complete is not None
+                    and parsed_chunk.get("output_index", 0) in args_already_complete):
+                return ModelResponseStream(
+                    choices=[
+                        StreamingChoices(index=0, delta=Delta(), finish_reason=None)
+                    ]
+                )
             if content_part:
                 tool_call_index = OpenAiResponsesToChatCompletionStreamIterator._sequential_tool_call_index(
                     tool_call_index_map, parsed_chunk.get("output_index", 0)
@@ -1924,7 +1938,8 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         return self._with_served_service_tier(
             self._with_stream_scoped_id(
                 OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream(
-                    chunk, tool_call_index_map=self._tool_call_index_map
+                    chunk, tool_call_index_map=self._tool_call_index_map,
+                    args_already_complete=self._args_already_complete,
                 )
             )
         )
