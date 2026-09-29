@@ -1,0 +1,23 @@
+tests/test_litellm/completion_extras/test_responses_bridge_provider_fields.py
+  s_6d72a4fbbd935a::t_b71892ff0c95c3 28,30-31,35
+  s_6d72a4fbbd935a::t_5c5fe3e1f43a10 1-27,29,32-34,36-107
+litellm/completion_extras/litellm_responses_transformation/transformation.py
+  s_6d72a4fbbd935a::t_31644cea0a987e 1453
+  s_6d72a4fbbd935a::t_361912c025570a 1460
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "fffbc4be458f60c2f182ab89aca7b9f4f7f865af",
+  "prompts": {},
+  "sessions": {
+    "s_6d72a4fbbd935a": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20260928_090323_01b535",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
