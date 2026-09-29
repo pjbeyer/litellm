@@ -1475,14 +1475,14 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                 tool_call_index = OpenAiResponsesToChatCompletionStreamIterator._sequential_tool_call_index(
                     tool_call_index_map, parsed_chunk.get("output_index", 0)
                 )
-                tool_call_chunk: Final = ChatCompletionToolCallChunk(
+                tool_call_chunk: Final = _ChatToolCallDict(
                     id=converted["id"],
                     index=tool_call_index,
                     type="function",
                     function=function_chunk,
                 )
                 if provider_specific_fields:
-                    tool_call_chunk.provider_specific_fields = provider_specific_fields
+                    tool_call_chunk["provider_specific_fields"] = provider_specific_fields
 
                 return ModelResponseStream(
                     choices=[
