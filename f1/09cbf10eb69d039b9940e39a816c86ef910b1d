@@ -1,0 +1,14 @@
+litellm/completion_extras/litellm_responses_transformation/transformation.py
+  h_c5be3b3dad7ca8 1358,1399,1467-1471,1501-1507,1703-1704
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "f109cbf10eb69d039b9940e39a816c86ef910b1d",
+  "prompts": {},
+  "humans": {
+    "h_c5be3b3dad7ca8": {
+      "author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
