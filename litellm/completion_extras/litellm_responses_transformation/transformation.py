@@ -1744,7 +1744,21 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                     ]
                 )
             else:
-                raise ValueError(f"Chat provider: Invalid function argument delta {parsed_chunk}")
+                # An empty or absent ``delta`` is a legitimate boundary/placeholder
+                # frame, not a malformed chunk: stream providers emit one when a tool
+                # call is split across deltas (and may omit the key entirely). Yield an
+                # empty no-op chunk -- the same idiom this function already uses for
+                # ``response.created`` -- instead of aborting the whole stream and
+                # discarding an in-flight tool call.
+                return ModelResponseStream(
+                    choices=[
+                        StreamingChoices(
+                            index=0,
+                            delta=Delta(),
+                            finish_reason=None,
+                        )
+                    ]
+                )
         elif event_type == ResponsesAPIStreamEvents.OUTPUT_ITEM_DONE:
             # New output item added
             output_item = parsed_chunk.get("item", {})
@@ -1810,7 +1824,18 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                     ]
                 )
             else:
-                raise ValueError(f"Chat provider: Invalid text delta {parsed_chunk}")
+                # Key absent entirely (``delta`` missing, not merely empty). Treat it
+                # as a boundary frame rather than aborting: same rationale as the
+                # function-argument branch above.
+                return ModelResponseStream(
+                    choices=[
+                        StreamingChoices(
+                            index=0,
+                            delta=Delta(),
+                            finish_reason=None,
+                        )
+                    ]
+                )
         elif event_type == "response.reasoning_summary_text.delta":
             content_part = parsed_chunk.get("delta", None)
             if content_part:
