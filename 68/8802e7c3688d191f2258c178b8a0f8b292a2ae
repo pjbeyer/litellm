@@ -1,0 +1,27 @@
+litellm/proxy/_experimental/mcp_server/mcp_server_manager.py
+  s_40376ea7facda9::t_b921752fef5da8 278-291
+  s_40376ea7facda9::t_d4c08245a43169 4680-4682
+  s_40376ea7facda9::t_ffe8865199aef2 1999-2003
+  s_40376ea7facda9::t_d4d12e27adfb5a 293-307
+  s_40376ea7facda9::t_eb0c2048e30b5c 4361-4366,4369,4371,4398-4402,4410-4413,4416-4443
+  s_40376ea7facda9::t_98af82d3c8c90d 4353-4360,4367-4368,4370,4372-4397,4403-4409,4414-4415,4444-4466
+  s_40376ea7facda9::t_a94b5ddf72ec27 1993-1998
+  s_40376ea7facda9::t_4d5030ed256e9f 292
+  s_40376ea7facda9::t_daff7b67a7014d 4683-4685
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "688802e7c3688d191f2258c178b8a0f8b292a2ae",
+  "prompts": {},
+  "sessions": {
+    "s_40376ea7facda9": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261021_151556_8ba6c8a0",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
