@@ -1,0 +1,25 @@
+tests/unit/test_router/test_router.py
+  s_9e4265bd7a8616::t_98f7b05b4cb144 18262-18371
+litellm/router.py
+  s_9e4265bd7a8616::t_4dd8e18a0ee3d6 2709
+  s_9e4265bd7a8616::t_d1e58aaef961c1 273
+  s_9e4265bd7a8616::t_1275d55df87208 3946-3950
+  s_9e4265bd7a8616::t_35dd4cd7dffd53 2772-2776
+  s_9e4265bd7a8616::t_1e8ddc6de61f7a 2686-2708,2710-2729
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "7897e75e79cf4a050b819801990e9381c869c005",
+  "prompts": {},
+  "sessions": {
+    "s_9e4265bd7a8616": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261025_190959_3828d0",
+        "model": "glm-5.3-flash"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
