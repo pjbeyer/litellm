@@ -1,5 +1,6 @@
 litellm/completion_extras/litellm_responses_transformation/transformation.py
   h_c5be3b3dad7ca8 2030,2074,2147-2151,2180-2186
+  s_82359ce23e9b40::t_bfc44e6da521f5 2412
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -9,6 +10,16 @@ litellm/completion_extras/litellm_responses_transformation/transformation.py
   "humans": {
     "h_c5be3b3dad7ca8": {
       "author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  },
+  "sessions": {
+    "s_82359ce23e9b40": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261102_200433_d3ebd9be",
+        "model": "smart-router"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
     }
   }
 }
