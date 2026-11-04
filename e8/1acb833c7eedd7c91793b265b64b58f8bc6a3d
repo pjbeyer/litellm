@@ -1,0 +1,28 @@
+tests/unit/completion_extras/test_responses_bridge_boundary_delta.py
+  s_abbb412c3bb4dc::t_c5c59660f10441 298-312,315-326
+  s_abbb412c3bb4dc::t_a72c6378e62bc4 313-314
+litellm/completion_extras/litellm_responses_transformation/transformation.py
+  s_abbb412c3bb4dc::t_82c87a0915dbc3 2153-2156,2159-2162
+  s_abbb412c3bb4dc::t_d50cce0e2cfe58 2193-2198,2200,2205-2211,2229-2236
+  s_abbb412c3bb4dc::t_2ee960115dd0fe 2463-2464
+  s_abbb412c3bb4dc::t_6baa4e13f1d8a3 2077-2078
+  s_abbb412c3bb4dc::t_6e29cbafe934cc 2032
+  s_abbb412c3bb4dc::t_93ea3c795b13bd 2031
+  s_abbb412c3bb4dc::t_0008fab76fdbec 2201-2204,2212-2228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "e81acb833c7eedd7c91793b265b64b58f8bc6a3d",
+  "prompts": {},
+  "sessions": {
+    "s_abbb412c3bb4dc": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261104_164328_e7a81f",
+        "model": "unknown"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
