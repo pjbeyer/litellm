@@ -1,0 +1,27 @@
+litellm/proxy/auth/user_api_key_auth.py
+  s_c83bd075f9b7c6::t_e7c3c3e056722e 2253-2260
+litellm/proxy/auth/auth_exception_handler.py
+  s_c83bd075f9b7c6::t_f01dd47f07def4 274-276
+  s_c83bd075f9b7c6::t_c8d85295457b94 221
+  s_c83bd075f9b7c6::t_03a1aedf71d3cf 6-7
+  s_c83bd075f9b7c6::t_5dd825689a6545 114-132
+tests/unit/proxy/auth/test_fr007_log_scrub_controls.py
+  s_c83bd075f9b7c6::t_2956f316587a7b 23
+  s_c83bd075f9b7c6::t_f99a8a22d5e038 1-22,24-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "0bd922c220115a1af6b4c602895f907dd1f55731",
+  "prompts": {},
+  "sessions": {
+    "s_c83bd075f9b7c6": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261103_192629_6e3263",
+        "model": "smart-router"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
