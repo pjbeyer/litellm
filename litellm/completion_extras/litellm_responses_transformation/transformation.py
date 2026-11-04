@@ -2028,8 +2028,8 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         self._first_message_item_done: bool = False
         self._reasoning_summary_streamed: bool = False
         self._args_already_complete: set[int] = set()  # mutable-ok: per-stream accumulator state
-        self._args_added_values: dict[int, str] = {}  # mutable-ok: per-stream, full args text from added events
-        self._args_seen_deltas: dict[int, str] = {}  # mutable-ok: per-stream, delta text suppressed per completed item
+        self._args_added_values: dict[int, str] = {}  # mutable-ok: per-stream, args text emitted on added events
+        self._args_seen_deltas: dict[int, int] = {}  # mutable-ok: per-stream, replay characters suppressed per completed item
 
     def _handle_string_chunk(
         self, str_line: Union[str, "BaseModel"]
@@ -2074,8 +2074,8 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         structured_output: bool = False,
         reasoning_summary_streamed: bool = False,
         args_already_complete: set[int] | None = None,  # mutable-ok: per-stream state, output_index with full args on added
-        args_added_values: dict[int, str] | None = None,  # mutable-ok: full args text from added events, for prefix checks
-        args_seen_deltas: dict[int, str] | None = None,  # mutable-ok: delta text already suppressed per completed item
+        args_added_values: dict[int, str] | None = None,  # mutable-ok: args text emitted on added events, for replay checks
+        args_seen_deltas: dict[int, int] | None = None,  # mutable-ok: replay characters already suppressed per completed item
     ) -> "ModelResponseStream":
         """
         Translate a Responses API streaming chunk to OpenAI chat completion streaming format.
@@ -2151,14 +2151,15 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                 # A gateway may put the complete arguments on the added event and
                 # also stream the identical payload as deltas. Forwarding both makes
                 # the client concatenate two copies, so remember the completed item
-                # and its full text: subsequent deltas are only dropped while they
-                # re-send that text as a prefix (a divergence means the producer
-                # is streaming genuinely new argument content and must be heard).
-                if args_already_complete is not None and converted["function"]["arguments"]:
+                # and the arguments text actually emitted: subsequent deltas are
+                # only dropped while they re-send that text as a prefix (a
+                # divergence means the producer is streaming genuinely new
+                # argument content and must be heard).
+                if args_already_complete is not None and function_chunk["arguments"]:
                     args_already_complete.add(parsed_chunk.get("output_index", 0))
                     if args_added_values is not None:
                         args_added_values[parsed_chunk.get("output_index", 0)] = (
-                            converted["function"]["arguments"]
+                            function_chunk["arguments"]
                         )
                 if provider_specific_fields:
                     function_chunk["provider_specific_fields"] = provider_specific_fields
@@ -2194,32 +2195,53 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                 added_args = (
                     args_added_values.get(output_index, "") if args_added_values is not None else ""
                 )
-                seen_so_far = (
-                    args_seen_deltas.get(output_index, "") if args_seen_deltas is not None else ""
+                # Number of replay characters already suppressed for this item.
+                seen_offset = (
+                    args_seen_deltas.get(output_index, 0) if args_seen_deltas is not None else 0
                 )
-                candidate = seen_so_far + content_part
-                replay_consumed = False
-                if added_args.startswith(candidate):
-                    # Pure replay in progress: the deltas so far are a prefix of
-                    # the added-event text (identical when complete). Suppress
-                    # and remember how much replay text was consumed.
-                    if args_seen_deltas is not None:
-                        args_seen_deltas[output_index] = candidate
-                    return ModelResponseStream(
-                        choices=[
-                            StreamingChoices(index=0, delta=Delta(), finish_reason=None)
-                        ]
-                    )
-                if candidate.startswith(added_args):
-                    # Replay finished plus new content in the same frame: suppress
-                    # the replayed part and forward the remainder as the delta.
-                    surplus = candidate[len(added_args):]
+                # How much of this frame still replays the added text, matched
+                # against the next slice only: O(len(delta)), not O(payload).
+                replayed = 0
+                while (
+                    replayed < len(content_part)
+                    and seen_offset + replayed < len(added_args)
+                    and content_part[replayed] == added_args[seen_offset + replayed]
+                ):
+                    replayed += 1
+                if replayed == len(content_part):
+                    if seen_offset + replayed < len(added_args):
+                        # Pure replay in progress: this frame re-sends text the
+                        # client already received via the added event. Suppress.
+                        if args_seen_deltas is not None:
+                            args_seen_deltas[output_index] = seen_offset + replayed
+                        return ModelResponseStream(
+                            choices=[
+                                StreamingChoices(index=0, delta=Delta(), finish_reason=None)
+                            ]
+                        )
+                    # Exact completion of the replay with this frame: suppress
+                    # and retire the guard for this item.
                     if args_seen_deltas is not None:
                         args_seen_deltas.pop(output_index, None)
                     if args_added_values is not None:
                         args_added_values.pop(output_index, None)
                     args_already_complete.discard(output_index)
-                    replay_consumed = True
+                    return ModelResponseStream(
+                        choices=[
+                            StreamingChoices(index=0, delta=Delta(), finish_reason=None)
+                        ]
+                    )
+                # The frame carries content beyond the replayed prefix.
+                if seen_offset + replayed >= len(added_args):
+                    # Replay completed exactly at the divergence point: forward
+                    # the surplus as-is. The surplus may legitimately begin with
+                    # text equal to the added arguments -- it is new content.
+                    surplus = content_part[replayed:]
+                    if args_seen_deltas is not None:
+                        args_seen_deltas.pop(output_index, None)
+                    if args_added_values is not None:
+                        args_added_values.pop(output_index, None)
+                    args_already_complete.discard(output_index)
                     if surplus:
                         content_part = surplus
                     else:
@@ -2228,23 +2250,19 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                                 StreamingChoices(index=0, delta=Delta(), finish_reason=None)
                             ]
                         )
-                if not replay_consumed:
-                    # Divergence from the added-event text: the producer is streaming
-                    # genuinely new argument content (e.g. only a prefix was placed on
-                    # the added event, or the replay is followed by a correction).
-                    # Strip any portion of this delta that still replays text the
-                    # client already received via the added event, and forward only
+                else:
+                    # Mid-replay divergence: the producer is streaming genuinely
+                    # new argument content (e.g. only a prefix was placed on the
+                    # added event, or the replay is followed by a correction).
+                    # Strip the portion of this frame that still replays text the
+                    # client already received via the added event and forward only
                     # the genuinely new suffix.
                     if args_seen_deltas is not None:
                         args_seen_deltas.pop(output_index, None)
                     if args_added_values is not None:
                         args_added_values.pop(output_index, None)
                     args_already_complete.discard(output_index)
-                    replay_remainder = added_args[len(seen_so_far):]
-                    matched = len(replay_remainder)
-                    while matched > 0 and replay_remainder[:matched] != content_part[:matched]:
-                        matched -= 1
-                    new_suffix = content_part[matched:]
+                    new_suffix = content_part[replayed:]
                     if new_suffix:
                         content_part = new_suffix
                     else:

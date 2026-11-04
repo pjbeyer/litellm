@@ -375,3 +375,36 @@ def test_replay_surplus_starting_with_replay_text_is_preserved():
     # stripped and its surplus 'abX' forwarded, so the client assembles
     # 'ab' + 'abX' (the surplus itself is never stripped).
     assert _arguments_by_index(chunks)[0] == "ababX"
+
+def test_event_level_arguments_fallback_is_tracked_for_replay():
+    """Arguments delivered via the event-level 'arguments' fallback (item
+    arguments empty) are actually emitted, so their replay must be suppressed
+    like any other completed payload."""
+    added = _added_frame(0, "read_alpha", "call_1", "")
+    added["arguments"] = '{"path": "alpha"}'
+    frames = [
+        added,
+        _argument_delta(0, "call_1", '{"path": "alpha"}'),
+    ]
+
+    chunks, error = _drive(frames)
+
+    assert error is None, f"stream aborted: {error!r}"
+    assembled = _arguments_by_index(chunks)[0]
+    assert assembled.count("{") == 1, f"fallback payload duplicated: {assembled!r}"
+    assert json.loads(assembled) == {"path": "alpha"}
+
+def test_replay_across_many_small_deltas_stays_correct():
+    """A large replay split into many small deltas is suppressed in full, with
+    per-frame matching against the next slice of the added text only."""
+    payload = json.dumps({"path": "alpha" * 64})
+    added = _added_frame(0, "read_alpha", "call_1", payload)
+    frames = [added]
+    for i in range(0, len(payload), 4):
+        frames.append(_argument_delta(0, "call_1", payload[i:i + 4]))
+
+    chunks, error = _drive(frames)
+
+    assert error is None, f"stream aborted: {error!r}"
+    assembled = _arguments_by_index(chunks)[0]
+    assert assembled == payload
