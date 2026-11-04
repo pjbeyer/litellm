@@ -21900,3 +21900,344 @@ def test_id_jag_listed_tool_metadata_is_isolated_between_identity_assertions() -
     manager.record_listed_tools(server, (first,), callers[0])
     manager.record_listed_tools(server, (second,), callers[1])
     assert tuple(manager.get_listed_tool(server, "list_notes", caller) for caller in callers) == (first, second, None)
+
+
+async def test_tools_page_ttl_cache_hits_within_window(monkeypatch):
+    """repeated first-page listings within the TTL hit the cache."""
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cache-ttl-1",
+        name="cache_ttl_1",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def uncached(**kwargs):
+        calls.append(1)
+        return ListToolsResult(tools=[MCPTool(name="probe-tool", inputSchema={"type": "object"})])
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", uncached)
+    r1 = await manager.get_tools_page(server=server)
+    r2 = await manager.get_tools_page(server=server)
+    assert len(calls) == 1
+    assert r1.tools == r2.tools
+
+
+async def test_tools_page_ttl_cache_bypasses_on_cursor(monkeypatch):
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cache-ttl-2",
+        name="cache_ttl_2",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def uncached(**kwargs):
+        calls.append(1)
+        return ListToolsResult(tools=[MCPTool(name="t", inputSchema={"type": "object"})])
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", uncached)
+    await manager.get_tools_page(server=server)
+    from types import SimpleNamespace
+
+    paginated = SimpleNamespace(cursor="next")
+    await manager.get_tools_page(server=server, params=paginated)
+    assert len(calls) == 2
+
+
+async def test_tools_page_ttl_cache_disabled_when_ttl_zero(monkeypatch):
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "0")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cache-ttl-3",
+        name="cache_ttl_3",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def uncached(**kwargs):
+        calls.append(1)
+        return ListToolsResult(tools=[MCPTool(name="t", inputSchema={"type": "object"})])
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", uncached)
+    await manager.get_tools_page(server=server)
+    await manager.get_tools_page(server=server)
+    assert len(calls) == 2
+
+
+async def test_tools_page_cache_skips_empty_result(monkeypatch):
+    """A degraded upstream's empty catalog must not be pinned for the TTL."""
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cache-ttl-4",
+        name="cache_ttl_4",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+    state = {"n": 0}
+
+    async def uncached(**kwargs):
+        state["n"] += 1
+        calls.append("empty" if state["n"] == 1 else "full")
+        if state["n"] == 1:
+            return ListToolsResult(tools=[])
+        return ListToolsResult(tools=[MCPTool(name="t", inputSchema={"type": "object"})])
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", uncached)
+    await manager.get_tools_page(server=server)
+    await manager.get_tools_page(server=server)
+    assert calls == ["empty", "full"]
+
+
+async def test_tools_page_cache_invalidated_on_server_save(monkeypatch):
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cache-ttl-5",
+        name="cache_ttl_5",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def uncached(**kwargs):
+        calls.append(1)
+        return ListToolsResult(tools=[MCPTool(name="t", inputSchema={"type": "object"})])
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", uncached)
+    await manager.get_tools_page(server=server)
+    manager._drop_listed_tools(server.server_id)
+    await manager.get_tools_page(server=server)
+    assert len(calls) == 2
+
+
+async def test_tools_page_cache_single_flight(monkeypatch):
+    """Concurrent first-page listings produce exactly one upstream call."""
+    import asyncio as _asyncio
+
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cache-ttl-6",
+        name="cache_ttl_6",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def slow_uncached(**kwargs):
+        calls.append(1)
+        await _asyncio.sleep(0.05)
+        return ListToolsResult(tools=[MCPTool(name="t", inputSchema={"type": "object"})])
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", slow_uncached)
+    await _asyncio.gather(*(manager.get_tools_page(server=server) for _ in range(4)))
+    assert len(calls) == 1
+
+
+async def test_tools_page_failure_cooldown_fails_fast(monkeypatch):
+    """after a listing fault, calls within the cooldown fail fast
+    with the SAME classified fault and do not re-hit the upstream."""
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from litellm.proxy._experimental.mcp_server.exceptions import MCPServerListError
+    from litellm.proxy._experimental.mcp_server.faults.list_outcomes import (
+        ServerListFault,
+    )
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    monkeypatch.setenv(msm._TOOLS_LISTING_FAILURE_COOLDOWN_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cd-1",
+        name="cd_1",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def failing_uncached(**kwargs):
+        calls.append(1)
+        raise MCPServerListError(ServerListFault(tag="unreachable"), server.name)
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", failing_uncached)
+    with pytest.raises(MCPServerListError):
+        await manager.get_tools_page(server=server)
+    with pytest.raises(MCPServerListError) as exc_info:
+        await manager.get_tools_page(server=server)
+    assert len(calls) == 1  # second call served from cooldown, no upstream hit
+    assert exc_info.value.fault.tag == "unreachable"
+    assert exc_info.value.server_name == server.name
+
+
+async def test_tools_page_failure_cooldown_clears_after_success(monkeypatch):
+    """A later successful listing resets the failure state."""
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from litellm.proxy._experimental.mcp_server.exceptions import MCPServerListError
+    from litellm.proxy._experimental.mcp_server.faults.list_outcomes import (
+        ServerListFault,
+    )
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "0")
+    monkeypatch.setenv(msm._TOOLS_LISTING_FAILURE_COOLDOWN_ENV, "0")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cd-2",
+        name="cd_2",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def flaky_uncached(**kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise MCPServerListError(ServerListFault(tag="timeout"), server.name)
+        return ListToolsResult(tools=[MCPTool(name="t", inputSchema={"type": "object"})])
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", flaky_uncached)
+    with pytest.raises(MCPServerListError):
+        await manager.get_tools_page(server=server)
+    # cooldown disabled: second attempt goes upstream and succeeds
+    result = await manager.get_tools_page(server=server)
+    assert result.tools
+    assert manager._tools_page_failures.get((server.server_id, "anon")) is None
+
+
+async def test_tools_page_failure_cooldown_never_pins_auth_faults(monkeypatch):
+    """auth_required/forbidden faults must not enter cooldown: a corrected
+    credential should take effect on the very next listing."""
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from litellm.proxy._experimental.mcp_server.exceptions import MCPServerListError
+    from litellm.proxy._experimental.mcp_server.faults.list_outcomes import (
+        ServerListFault,
+    )
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    monkeypatch.setenv(msm._TOOLS_LISTING_FAILURE_COOLDOWN_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cd-3",
+        name="cd_3",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def failing_uncached(**kwargs):
+        calls.append(1)
+        raise MCPServerListError(ServerListFault(tag="auth_required"), server.name)
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", failing_uncached)
+    with pytest.raises(MCPServerListError):
+        await manager.get_tools_page(server=server)
+    with pytest.raises(MCPServerListError):
+        await manager.get_tools_page(server=server)
+    assert len(calls) == 2  # both attempts hit upstream: auth faults are not pinned
+
+
+async def test_tools_page_failure_cooldown_bypassed_on_cursor(monkeypatch):
+    """Continuation pages bypass the cooldown (in-flight conversation)."""
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from litellm.proxy._experimental.mcp_server.exceptions import MCPServerListError
+    from litellm.proxy._experimental.mcp_server.faults.list_outcomes import (
+        ServerListFault,
+    )
+    from mcp.types import ListToolsResult
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    monkeypatch.setenv(msm._TOOLS_LISTING_FAILURE_COOLDOWN_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cd-4",
+        name="cd_4",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+
+    async def failing_uncached(**kwargs):
+        calls.append(1)
+        raise MCPServerListError(ServerListFault(tag="unreachable"), server.name)
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", failing_uncached)
+    with pytest.raises(MCPServerListError):
+        await manager.get_tools_page(server=server)
+    from types import SimpleNamespace
+
+    with pytest.raises(MCPServerListError):
+        await manager.get_tools_page(server=server, params=SimpleNamespace(cursor="next"))
+    assert len(calls) == 2  # paginated call bypassed cooldown and hit upstream
+
+
+async def test_tools_page_failure_cooldown_cleared_on_server_save(monkeypatch):
+    from litellm.proxy.mcp_server import mcp_server_manager as msm
+    from litellm.proxy._experimental.mcp_server.exceptions import MCPServerListError
+    from litellm.proxy._experimental.mcp_server.faults.list_outcomes import (
+        ServerListFault,
+    )
+    from mcp.types import ListToolsResult
+    from mcp.types import Tool as MCPTool
+
+    monkeypatch.setenv(msm._TOOLS_LISTING_CACHE_TTL_ENV, "60")
+    monkeypatch.setenv(msm._TOOLS_LISTING_FAILURE_COOLDOWN_ENV, "60")
+    manager = msm.MCPServerManager()
+    server = MCPServer(
+        server_id="cd-5",
+        name="cd_5",
+        url="https://example.invalid/mcp",
+        transport=MCPTransport.http,
+    )
+    calls = []
+    fail_first = {"v": True}
+
+    async def flaky_uncached(**kwargs):
+        calls.append(1)
+        if fail_first["v"]:
+            raise MCPServerListError(ServerListFault(tag="unreachable"), server.name)
+        return ListToolsResult(tools=[MCPTool(name="t", inputSchema={"type": "object"})])
+
+    monkeypatch.setattr(manager, "_get_tools_page_uncached", flaky_uncached)
+    with pytest.raises(MCPServerListError):
+        await manager.get_tools_page(server=server)
+    manager._drop_listed_tools(server.server_id)
+    fail_first["v"] = False
+    result = await manager.get_tools_page(server=server)  # within cooldown window
+    assert result.tools
+    assert len(calls) == 2

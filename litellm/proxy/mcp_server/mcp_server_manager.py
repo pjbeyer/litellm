@@ -289,6 +289,39 @@ _USER_ENV_VARS_CACHE_MAX_SIZE: Final = 4096  # cap to prevent unbounded growth
 
 _ListedToolsByCaller: TypeAlias = Mapping[str | None, Mapping[str, MCPTool]]
 _LISTED_TOOLS_CALLERS_PER_SERVER: Final = 256
+
+# First-page tools/list TTL cache. 0 disables the cache.
+_TOOLS_LISTING_CACHE_TTL_ENV = "LITELLM_MCP_LISTING_CACHE_TTL"
+_TOOLS_LISTING_CACHE_TTL_DEFAULT: Final = 60
+
+
+def _tools_listing_cache_ttl() -> int:
+    raw = os.getenv(_TOOLS_LISTING_CACHE_TTL_ENV)
+    if raw is None or raw.strip() == "":
+        return _TOOLS_LISTING_CACHE_TTL_DEFAULT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _TOOLS_LISTING_CACHE_TTL_DEFAULT
+
+
+# Post-failure cooldown: seconds a (server, identity) listing fails fast after
+# a classified listing fault. 0 disables.
+_TOOLS_LISTING_FAILURE_COOLDOWN_ENV = "LITELLM_MCP_LIST_FAILURE_COOLDOWN"
+_TOOLS_LISTING_FAILURE_COOLDOWN_DEFAULT: Final = 30
+
+
+def _tools_listing_failure_cooldown() -> int:
+    raw = os.getenv(_TOOLS_LISTING_FAILURE_COOLDOWN_ENV)
+    if raw is None or raw.strip() == "":
+        return _TOOLS_LISTING_FAILURE_COOLDOWN_DEFAULT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _TOOLS_LISTING_FAILURE_COOLDOWN_DEFAULT
+
+
+
 _UNTYPED_VALUE: Final = TypeAdapter(object)
 
 
@@ -2084,6 +2117,17 @@ class MCPServerManager:
         """
         self._listed_tools_by_server_id: dict[str, _ListedToolsByCaller] = {}  # mutable-ok: refreshed per tools/list
         self._listed_tools_generations: dict[str, int] = {}  # mutable-ok: bumped per server save
+        # TTL cache for the first-page tools/list result: the
+        # aggregator re-lists every upstream on every search_tools call, which
+        # multiplies a degraded upstream's latency into every consumer burst.
+        # Keyed by (server_id, caller identity); single-flight per server.
+        self._tools_page_cache: dict[tuple[str, str], tuple[float, ListToolsResult]] = {}
+        self._tools_page_locks: dict[str, asyncio.Lock] = {}
+        # last listing-failure state per (server_id, identity).
+        # Value: monotonic failure timestamp; faults store the classified
+        # MCPServerListError to re-raise unchanged during cooldown.
+        self._tools_page_failures: dict[tuple[str, str], float] = {}
+        self._tools_page_failure_faults: dict[tuple[str, str], MCPServerListError] = {}
         self._upstream_initialize_instructions_by_server_id: dict[str, str] = {}
         # Per-server monotonic timestamp of last upstream prefetch attempt (success,
         # empty result, or failure). Used to throttle re-probes for servers that do
@@ -4474,6 +4518,120 @@ class MCPServerManager:
         record_listing: bool = False,
         listing_updates: ExitStack | None = None,
     ) -> ListToolsResult:
+        """Cache-aware first-page tools/list.
+
+        A short TTL cache with per-server single-flight turns one live listing
+        per TTL window per upstream instead of one per consumer call.
+        Continuation pages and record_listing callers bypass the cache so
+        pagination and observability semantics are unchanged.
+
+        After a listing failure, further first-page listings for the same
+        (server, identity) fail fast with the SAME classified fault for a
+        short cooldown window instead of re-hitting a degraded upstream on
+        every call of a consumer burst. Continuation pages bypass the
+        cooldown (they continue an in-flight conversation, not a fresh
+        burst).
+        """
+        ttl = _tools_listing_cache_ttl()
+        cooldown = _tools_listing_failure_cooldown()
+        paginated = params is not None and params.cursor is not None
+        if (ttl <= 0 and cooldown <= 0) or paginated or record_listing:
+            return await self._get_tools_page_uncached(
+                server=server,
+                mcp_auth_header=mcp_auth_header,
+                extra_headers=extra_headers,
+                add_prefix=add_prefix,
+                raw_headers=raw_headers,
+                user_api_key_auth=user_api_key_auth,
+                oauth2_headers=oauth2_headers,
+                client_ip=client_ip,
+                proxy_logging_obj=proxy_logging_obj,
+                params=params,
+                catalog_auth_header=catalog_auth_header,
+                record_listing=record_listing,
+                listing_updates=listing_updates,
+            )
+
+        caller: Final = ListedToolsCaller(
+            user_api_key_auth=user_api_key_auth,
+            mcp_auth_header=_catalog_auth_header(mcp_auth_header, catalog_auth_header),
+            raw_headers=raw_headers,
+            oauth2_headers=oauth2_headers,
+        )
+        identity: Final = self._listed_tools_identity(server, caller) or "anon"
+        key: Final = (server.server_id, identity)
+
+        now = time.monotonic()
+        failed_at = self._tools_page_failures.get(key)
+        if cooldown > 0 and failed_at is not None and failed_at > now - cooldown:
+            raise self._tools_page_failure_faults[key]
+
+        cached = self._tools_page_cache.get(key)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+
+        # Single-flight per server: one live listing, waiters re-check the cache.
+        lock = self._tools_page_locks.setdefault(server.server_id, asyncio.Lock())
+        async with lock:
+            now = time.monotonic()
+            failed_at = self._tools_page_failures.get(key)
+            if cooldown > 0 and failed_at is not None and failed_at > now - cooldown:
+                raise self._tools_page_failure_faults[key]
+            cached = self._tools_page_cache.get(key)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+            try:
+                result = await self._get_tools_page_uncached(
+                    server=server,
+                    mcp_auth_header=mcp_auth_header,
+                    extra_headers=extra_headers,
+                    add_prefix=add_prefix,
+                    raw_headers=raw_headers,
+                    user_api_key_auth=user_api_key_auth,
+                    oauth2_headers=oauth2_headers,
+                    client_ip=client_ip,
+                    proxy_logging_obj=proxy_logging_obj,
+                    params=params,
+                    catalog_auth_header=catalog_auth_header,
+                    record_listing=record_listing,
+                    listing_updates=listing_updates,
+                )
+            except MCPServerListError as exc:
+                # Cooldown only for upstream-side faults. A client-identity
+                # fault (auth) must not be pinned: a corrected credential
+                # should take effect at once.
+                fault_tag = getattr(getattr(exc, "fault", None), "tag", None)
+                # auth_required/forbidden are caller-identity faults; never pin.
+                if fault_tag not in ("auth_required", "forbidden"):
+                    self._tools_page_failures[key] = now
+                    self._tools_page_failure_faults[key] = exc
+                raise
+            # A successful listing clears any prior failure state.
+            self._tools_page_failures.pop(key, None)
+            self._tools_page_failure_faults.pop(key, None)
+            # Cache only successful, non-empty listings: a degraded upstream
+            # must not pin its failure (or its empty catalog) for the window.
+            if result.tools:
+                self._tools_page_cache[key] = (now + ttl, result)
+            return result
+
+    async def _get_tools_page_uncached(
+        self,
+        server: MCPServer,
+        mcp_auth_header: str | dict[str, str] | None = None,
+        extra_headers: dict[str, str] | None = None,
+        add_prefix: bool = True,
+        raw_headers: dict[str, str] | None = None,
+        user_api_key_auth: UserAPIKeyAuth | None = None,
+        oauth2_headers: dict[str, str] | None = None,
+        client_ip: str | None = None,
+        proxy_logging_obj: ProxyLogging | None = None,
+        *,
+        params: PaginatedRequestParams | None = None,
+        catalog_auth_header: str | dict[str, str] | None | EllipsisType = ...,
+        record_listing: bool = False,
+        listing_updates: ExitStack | None = None,
+    ) -> ListToolsResult:
         from litellm.proxy.mcp_server.tool_registry import (
             global_mcp_tool_registry,
         )
@@ -4685,6 +4843,15 @@ class MCPServerManager:
     def _drop_listed_tools(self, server_id: str) -> None:
         self._listed_tools_by_server_id.pop(server_id, None)
         self._listed_tools_generations[server_id] = self._listed_tools_generations.get(server_id, 0) + 1
+        # Invalidate the first-page TTL cache for this server: a config edit
+        # must be visible on the next listing, not after the TTL lapses.
+        for key in [k for k in self._tools_page_cache if k[0] == server_id]:
+            self._tools_page_cache.pop(key, None)
+        # Also clear failure cooldown state: a reconfigured server deserves a
+        # fresh listing attempt immediately.
+        for key in [k for k in self._tools_page_failures if k[0] == server_id]:
+            self._tools_page_failures.pop(key, None)
+            self._tools_page_failure_faults.pop(key, None)
 
     def _listed_tools_identity(self, server: MCPServer, caller: ListedToolsCaller | None) -> str | None:
         """Key the listed-tool cache by every request input that can change the served catalog.
