@@ -2190,14 +2190,15 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
             content_part: str | None = parsed_chunk.get("delta", None)
             if (content_part and args_already_complete is not None
                     and parsed_chunk.get("output_index", 0) in args_already_complete):
-                output_index: Final = parsed_chunk.get("output_index", 0)
-                added_args: Final = (
+                output_index = parsed_chunk.get("output_index", 0)
+                added_args = (
                     args_added_values.get(output_index, "") if args_added_values is not None else ""
                 )
-                seen_so_far: Final = (
+                seen_so_far = (
                     args_seen_deltas.get(output_index, "") if args_seen_deltas is not None else ""
                 )
-                candidate: Final = seen_so_far + content_part
+                candidate = seen_so_far + content_part
+                replay_consumed = False
                 if added_args.startswith(candidate):
                     # Pure replay in progress: the deltas so far are a prefix of
                     # the added-event text (identical when complete). Suppress
@@ -2212,12 +2213,13 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                 if candidate.startswith(added_args):
                     # Replay finished plus new content in the same frame: suppress
                     # the replayed part and forward the remainder as the delta.
-                    surplus: Final = candidate[len(added_args):]
+                    surplus = candidate[len(added_args):]
                     if args_seen_deltas is not None:
                         args_seen_deltas.pop(output_index, None)
                     if args_added_values is not None:
                         args_added_values.pop(output_index, None)
                     args_already_complete.discard(output_index)
+                    replay_consumed = True
                     if surplus:
                         content_part = surplus
                     else:
@@ -2226,30 +2228,31 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                                 StreamingChoices(index=0, delta=Delta(), finish_reason=None)
                             ]
                         )
-                # Divergence from the added-event text: the producer is streaming
-                # genuinely new argument content (e.g. only a prefix was placed on
-                # the added event, or the replay is followed by a correction).
-                # Strip any portion of this delta that still replays text the
-                # client already received via the added event, and forward only
-                # the genuinely new suffix.
-                if args_seen_deltas is not None:
-                    args_seen_deltas.pop(output_index, None)
-                if args_added_values is not None:
-                    args_added_values.pop(output_index, None)
-                args_already_complete.discard(output_index)
-                replay_remainder: Final = added_args[len(seen_so_far):]
-                matched: Final = len(replay_remainder)
-                while matched > 0 and replay_remainder[:matched] != content_part[:matched]:
-                    matched -= 1
-                new_suffix: Final = content_part[matched:]
-                if new_suffix:
-                    content_part = new_suffix
-                else:
-                    return ModelResponseStream(
-                        choices=[
-                            StreamingChoices(index=0, delta=Delta(), finish_reason=None)
-                        ]
-                    )
+                if not replay_consumed:
+                    # Divergence from the added-event text: the producer is streaming
+                    # genuinely new argument content (e.g. only a prefix was placed on
+                    # the added event, or the replay is followed by a correction).
+                    # Strip any portion of this delta that still replays text the
+                    # client already received via the added event, and forward only
+                    # the genuinely new suffix.
+                    if args_seen_deltas is not None:
+                        args_seen_deltas.pop(output_index, None)
+                    if args_added_values is not None:
+                        args_added_values.pop(output_index, None)
+                    args_already_complete.discard(output_index)
+                    replay_remainder = added_args[len(seen_so_far):]
+                    matched = len(replay_remainder)
+                    while matched > 0 and replay_remainder[:matched] != content_part[:matched]:
+                        matched -= 1
+                    new_suffix = content_part[matched:]
+                    if new_suffix:
+                        content_part = new_suffix
+                    else:
+                        return ModelResponseStream(
+                            choices=[
+                                StreamingChoices(index=0, delta=Delta(), finish_reason=None)
+                            ]
+                        )
             if content_part:
                 tool_call_index = OpenAiResponsesToChatCompletionStreamIterator._sequential_tool_call_index(
                     tool_call_index_map, parsed_chunk.get("output_index", 0)

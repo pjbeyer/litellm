@@ -358,3 +358,20 @@ def test_replay_divergence_strips_matched_replay_text():
     # Client already has '{"path": "alpha"}' from the added event; the
     # divergent delta's still-matching replay prefix ('ph') is stripped.
     assert assembled == '{"path": "alpha"}b"}extra'
+
+def test_replay_surplus_starting_with_replay_text_is_preserved():
+    """Replay-plus-surplus in one frame: the surplus itself may legitimately
+    begin with text equal to the added arguments; only the single replay is
+    stripped, not the surplus."""
+    frames = [
+        _added_frame(0, "echo", "call_1", "ab"),
+        _argument_delta(0, "call_1", "ababX"),
+    ]
+
+    chunks, error = _drive(frames)
+
+    assert error is None, f"stream aborted: {error!r}"
+    # The added event delivered 'ab'; the delta's single replay of 'ab' is
+    # stripped and its surplus 'abX' forwarded, so the client assembles
+    # 'ab' + 'abX' (the surplus itself is never stripped).
+    assert _arguments_by_index(chunks)[0] == "ababX"
