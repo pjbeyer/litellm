@@ -1,0 +1,38 @@
+litellm/proxy/mcp_server/mcp_server_manager.py
+  s_82359ce23e9b40::t_7b0070ff080dd4 4850-4852
+  s_82359ce23e9b40::t_eb2edcb08e2487 4520
+  s_82359ce23e9b40::t_404a9c58b1898e 293-324
+  s_82359ce23e9b40::t_171b7914bbce5a 292
+  s_82359ce23e9b40::t_759770e975a142 4521-4633,4853-4854
+  s_82359ce23e9b40::t_43b606d2fdd297 4847-4849
+  s_abbb412c3bb4dc::t_2962e9874089d2 2120-2130,4846
+tests/unit/proxy/mcp_server/test_mcp_server_manager.py
+  s_82359ce23e9b40::t_af1ed86f1ca08a 21909-22243
+  s_82359ce23e9b40::t_82dcbed2cb0a52 21906-21908
+  s_82359ce23e9b40::t_b7798dff35d18a 21904-21905
+  s_82359ce23e9b40::t_276c25b957aa92 21903
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "f341c2e69e3a4dfe3a56019d89a83dcaaf14e238",
+  "prompts": {},
+  "sessions": {
+    "s_82359ce23e9b40": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261102_200433_d3ebd9be",
+        "model": "smart-router"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    },
+    "s_abbb412c3bb4dc": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261104_164328_e7a81f",
+        "model": "smart-router"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
