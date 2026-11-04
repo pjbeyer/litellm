@@ -1,0 +1,24 @@
+litellm/completion_extras/litellm_responses_transformation/transformation.py
+  s_abbb412c3bb4dc::t_9cb1e1f5c3fb74 2198-2200,2202-2223,2225-2228,2234-2239,2253-2258,2265
+  s_abbb412c3bb4dc::t_30cd4820e7e507 2031-2032
+  s_abbb412c3bb4dc::t_442c7356c27ab3 2154-2158,2162
+  s_abbb412c3bb4dc::t_59e6af077680a5 2077-2078
+tests/unit/completion_extras/test_responses_bridge_boundary_delta.py
+  s_abbb412c3bb4dc::t_1bd79f75e6ecf8 378-410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "5ffc84758808ce8f891bbb7041e33175a25c30ea",
+  "prompts": {},
+  "sessions": {
+    "s_abbb412c3bb4dc": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261104_164328_e7a81f",
+        "model": "smart-router"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
