@@ -1,0 +1,16 @@
+litellm/completion_extras/litellm_responses_transformation/transformation.py
+  h_c5be3b3dad7ca8 2196-2210,2276-2287
+tests/unit/completion_extras/test_responses_bridge_boundary_delta.py
+  h_c5be3b3dad7ca8 1-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "65ddf11522d5a5bee720638cfeec3ff2aa3540b5",
+  "prompts": {},
+  "humans": {
+    "h_c5be3b3dad7ca8": {
+      "author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
