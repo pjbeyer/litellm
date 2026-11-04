@@ -1,0 +1,21 @@
+tests/unit/completion_extras/test_responses_bridge_boundary_delta.py
+  s_abbb412c3bb4dc::t_6521babbaf4043 361-377
+litellm/completion_extras/litellm_responses_transformation/transformation.py
+  s_abbb412c3bb4dc::t_6c106f41feec51 2193-2194,2197,2200-2201,2216,2222,2231-2255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "28779ae5fa18d6f915332de872526f4b23a2042b",
+  "prompts": {},
+  "sessions": {
+    "s_abbb412c3bb4dc": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261104_164328_e7a81f",
+        "model": "unknown"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
