@@ -324,3 +324,37 @@ def test_added_prefix_followed_by_replay_then_remainder():
     assembled = _arguments_by_index(chunks)[0]
     assert assembled.count("{") == 1, f"assembled a repeated payload: {assembled!r}"
     assert json.loads(assembled) == {"path": "alpha"}
+
+def test_mid_replay_divergence_emits_only_new_suffix():
+    """Divergence partway through a replay must not re-emit text the client
+    already received on the added event (replay suppressed, surplus kept)."""
+    frames = [
+        _added_frame(0, "read_alpha", "call_1", '{"path": "alpha"}'),
+        _argument_delta(0, "call_1", '{"path": "al'),
+        _argument_delta(0, "call_1", 'pha"}{"query": "x"}'),
+    ]
+
+    chunks, error = _drive(frames)
+
+    assert error is None, f"stream aborted: {error!r}"
+    assembled = _arguments_by_index(chunks)[0]
+    assert assembled.count('"alpha"') == 1, f"replayed text re-emitted: {assembled!r}"
+    assert assembled == '{"path": "alpha"}{"query": "x"}'
+
+def test_replay_divergence_strips_matched_replay_text():
+    """When a delta diverges before the replay completes, only the genuinely
+    new suffix is forwarded -- text already delivered via the added event is
+    never re-emitted."""
+    frames = [
+        _added_frame(0, "read_alpha", "call_1", '{"path": "alpha"}'),
+        _argument_delta(0, "call_1", '{"path": "al'),
+        _argument_delta(0, "call_1", 'phb"}extra'),
+    ]
+
+    chunks, error = _drive(frames)
+
+    assert error is None, f"stream aborted: {error!r}"
+    assembled = _arguments_by_index(chunks)[0]
+    # Client already has '{"path": "alpha"}' from the added event; the
+    # divergent delta's still-matching replay prefix ('ph') is stripped.
+    assert assembled == '{"path": "alpha"}b"}extra'

@@ -2228,12 +2228,28 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                         )
                 # Divergence from the added-event text: the producer is streaming
                 # genuinely new argument content (e.g. only a prefix was placed on
-                # the added event). Stop suppressing this item and forward deltas.
+                # the added event, or the replay is followed by a correction).
+                # Strip any portion of this delta that still replays text the
+                # client already received via the added event, and forward only
+                # the genuinely new suffix.
                 if args_seen_deltas is not None:
                     args_seen_deltas.pop(output_index, None)
                 if args_added_values is not None:
                     args_added_values.pop(output_index, None)
                 args_already_complete.discard(output_index)
+                replay_remainder: Final = added_args[len(seen_so_far):]
+                matched: Final = len(replay_remainder)
+                while matched > 0 and replay_remainder[:matched] != content_part[:matched]:
+                    matched -= 1
+                new_suffix: Final = content_part[matched:]
+                if new_suffix:
+                    content_part = new_suffix
+                else:
+                    return ModelResponseStream(
+                        choices=[
+                            StreamingChoices(index=0, delta=Delta(), finish_reason=None)
+                        ]
+                    )
             if content_part:
                 tool_call_index = OpenAiResponsesToChatCompletionStreamIterator._sequential_tool_call_index(
                     tool_call_index_map, parsed_chunk.get("output_index", 0)
