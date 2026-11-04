@@ -295,3 +295,32 @@ def test_arguments_only_from_deltas_still_assemble_fully():
 
     assert error is None, f"stream aborted: {error!r}"
     assert json.loads(_arguments_by_index(chunks)[0]) == {"path": "alpha"}
+
+def test_added_prefix_with_remainder_deltas_is_not_truncated():
+    """No over-suppression: a partial payload on the added event must not
+    swallow the deltas that carry the rest of the arguments."""
+    frames = [
+        _added_frame(0, "read_alpha", "call_1", '{"path": '),
+        _argument_delta(0, "call_1", '"alpha"}'),
+    ]
+
+    chunks, error = _drive(frames)
+
+    assert error is None, f"stream aborted: {error!r}"
+    assert json.loads(_arguments_by_index(chunks)[0]) == {"path": "alpha"}
+
+def test_added_prefix_followed_by_replay_then_remainder():
+    """The duplicate-replay shape tolerates splitting: a replay sent across
+    multiple delta frames is fully suppressed, not just the first frame."""
+    frames = [
+        _added_frame(0, "read_alpha", "call_1", '{"path": "alpha"}'),
+        _argument_delta(0, "call_1", '{"path": '),
+        _argument_delta(0, "call_1", '"alpha"}'),
+    ]
+
+    chunks, error = _drive(frames)
+
+    assert error is None, f"stream aborted: {error!r}"
+    assembled = _arguments_by_index(chunks)[0]
+    assert assembled.count("{") == 1, f"assembled a repeated payload: {assembled!r}"
+    assert json.loads(assembled) == {"path": "alpha"}

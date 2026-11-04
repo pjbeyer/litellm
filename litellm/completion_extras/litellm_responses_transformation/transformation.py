@@ -2028,6 +2028,8 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         self._first_message_item_done: bool = False
         self._reasoning_summary_streamed: bool = False
         self._args_already_complete: set[int] = set()  # mutable-ok: per-stream accumulator state
+        self._args_added_values: dict[int, str] = {}  # mutable-ok: per-stream, full args text from added events
+        self._args_seen_deltas: dict[int, str] = {}  # mutable-ok: per-stream, delta text suppressed per completed item
 
     def _handle_string_chunk(
         self, str_line: Union[str, "BaseModel"]
@@ -2072,6 +2074,8 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
         structured_output: bool = False,
         reasoning_summary_streamed: bool = False,
         args_already_complete: set[int] | None = None,  # mutable-ok: per-stream state, output_index with full args on added
+        args_added_values: dict[int, str] | None = None,  # mutable-ok: full args text from added events, for prefix checks
+        args_seen_deltas: dict[int, str] | None = None,  # mutable-ok: delta text already suppressed per completed item
     ) -> "ModelResponseStream":
         """
         Translate a Responses API streaming chunk to OpenAI chat completion streaming format.
@@ -2146,9 +2150,16 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                 )
                 # A gateway may put the complete arguments on the added event and
                 # also stream the identical payload as deltas. Forwarding both makes
-                # the client concatenate two copies, so remember the completed item.
+                # the client concatenate two copies, so remember the completed item
+                # and its full text: subsequent deltas are only dropped while they
+                # re-send that text as a prefix (a divergence means the producer
+                # is streaming genuinely new argument content and must be heard).
                 if args_already_complete is not None and converted["function"]["arguments"]:
                     args_already_complete.add(parsed_chunk.get("output_index", 0))
+                    if args_added_values is not None:
+                        args_added_values[parsed_chunk.get("output_index", 0)] = (
+                            converted["function"]["arguments"]
+                        )
                 if provider_specific_fields:
                     function_chunk["provider_specific_fields"] = provider_specific_fields
 
@@ -2179,11 +2190,50 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
             content_part: str | None = parsed_chunk.get("delta", None)
             if (content_part and args_already_complete is not None
                     and parsed_chunk.get("output_index", 0) in args_already_complete):
-                return ModelResponseStream(
-                    choices=[
-                        StreamingChoices(index=0, delta=Delta(), finish_reason=None)
-                    ]
+                output_index: Final = parsed_chunk.get("output_index", 0)
+                added_args: Final = (
+                    args_added_values.get(output_index, "") if args_added_values is not None else ""
                 )
+                seen_so_far: Final = (
+                    args_seen_deltas.get(output_index, "") if args_seen_deltas is not None else ""
+                )
+                candidate: Final = seen_so_far + content_part
+                if added_args.startswith(candidate):
+                    # Pure replay in progress: the deltas so far are a prefix of
+                    # the added-event text (identical when complete). Suppress
+                    # and remember how much replay text was consumed.
+                    if args_seen_deltas is not None:
+                        args_seen_deltas[output_index] = candidate
+                    return ModelResponseStream(
+                        choices=[
+                            StreamingChoices(index=0, delta=Delta(), finish_reason=None)
+                        ]
+                    )
+                if candidate.startswith(added_args):
+                    # Replay finished plus new content in the same frame: suppress
+                    # the replayed part and forward the remainder as the delta.
+                    surplus: Final = candidate[len(added_args):]
+                    if args_seen_deltas is not None:
+                        args_seen_deltas.pop(output_index, None)
+                    if args_added_values is not None:
+                        args_added_values.pop(output_index, None)
+                    args_already_complete.discard(output_index)
+                    if surplus:
+                        content_part = surplus
+                    else:
+                        return ModelResponseStream(
+                            choices=[
+                                StreamingChoices(index=0, delta=Delta(), finish_reason=None)
+                            ]
+                        )
+                # Divergence from the added-event text: the producer is streaming
+                # genuinely new argument content (e.g. only a prefix was placed on
+                # the added event). Stop suppressing this item and forward deltas.
+                if args_seen_deltas is not None:
+                    args_seen_deltas.pop(output_index, None)
+                if args_added_values is not None:
+                    args_added_values.pop(output_index, None)
+                args_already_complete.discard(output_index)
             if content_part:
                 tool_call_index = OpenAiResponsesToChatCompletionStreamIterator._sequential_tool_call_index(
                     tool_call_index_map, parsed_chunk.get("output_index", 0)
@@ -2410,6 +2460,8 @@ class OpenAiResponsesToChatCompletionStreamIterator(BaseModelResponseIterator):
                 structured_output=self._structured_output,
                 reasoning_summary_streamed=self._reasoning_summary_streamed,
                 args_already_complete=self._args_already_complete,
+                args_added_values=self._args_added_values,
+                args_seen_deltas=self._args_seen_deltas,
             )
         )
         if self._structured_output and _is_message_item_done(chunk):
