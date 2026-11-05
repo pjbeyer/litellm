@@ -4538,7 +4538,10 @@ class MCPServerManager:
         """
         ttl = _tools_listing_cache_ttl()
         cooldown = _tools_listing_failure_cooldown()
-        paginated = params is not None and params.cursor is not None
+        # Cache only the plain full-list path. Any explicit `params` is the
+        # paginated API (first page included): its result must not be served
+        # to full-list callers, so those calls bypass entirely.
+        paginated = params is not None
         guardrail_path = proxy_logging_obj is not None
         if (
             (ttl <= 0 and cooldown <= 0)
@@ -4577,11 +4580,24 @@ class MCPServerManager:
         listed_generation: Final = self._listed_tools_generations.get(server.server_id, 0)
 
         def _evict_expired(now: float) -> None:
-            expired: list[tuple[str, str, bool]] = [
+            expired_cache: list[tuple[str, str, bool]] = [
                 k for k, (deadline, _r) in self._tools_page_cache.items() if deadline <= now
             ]
-            for k in expired:
+            for k in expired_cache:
                 self._tools_page_cache.pop(k, None)
+            expired_locks: list[tuple[str, str, bool]] = [
+                k for k, lock in self._tools_page_locks.items() if not lock.locked()
+            ]
+            for k in expired_locks:
+                self._tools_page_locks.pop(k, None)
+            expired_failures: list[tuple[str, str, bool]] = [
+                k
+                for k, failed_at in self._tools_page_failures.items()
+                if failed_at <= now - max(cooldown, 0)
+            ]
+            for k in expired_failures:
+                self._tools_page_failures.pop(k, None)
+                self._tools_page_failure_faults.pop(k, None)
 
         now = time.monotonic()
         _evict_expired(now)
@@ -4626,8 +4642,14 @@ class MCPServerManager:
                 # should take effect at once.
                 fault_tag = getattr(getattr(exc, "fault", None), "tag", None)
                 # auth_required/forbidden are caller-identity faults; never pin.
-                if fault_tag not in ("auth_required", "forbidden"):
-                    self._tools_page_failures[key] = now
+                # Timestamp the failure NOW (a slow timeout consumed much of
+                # the window) and ignore faults from a server definition that
+                # was reconfigured while this listing was in flight.
+                if (
+                    fault_tag not in ("auth_required", "forbidden")
+                    and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
+                ):
+                    self._tools_page_failures[key] = time.monotonic()
                     self._tools_page_failure_faults[key] = exc
                 raise
             # A successful listing clears any prior failure state.
