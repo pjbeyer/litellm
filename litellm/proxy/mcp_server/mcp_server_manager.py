@@ -2121,13 +2121,13 @@ class MCPServerManager:
         # aggregator re-lists every upstream on every search_tools call, which
         # multiplies a degraded upstream's latency into every consumer burst.
         # Keyed by (server_id, caller identity); single-flight per server.
-        self._tools_page_cache: dict[tuple[str, str], tuple[float, ListToolsResult]] = {}
+        self._tools_page_cache: dict[tuple[str, str, bool], tuple[float, ListToolsResult]] = {}
         self._tools_page_locks: dict[str, asyncio.Lock] = {}
         # last listing-failure state per (server_id, identity).
         # Value: monotonic failure timestamp; faults store the classified
         # MCPServerListError to re-raise unchanged during cooldown.
-        self._tools_page_failures: dict[tuple[str, str], float] = {}
-        self._tools_page_failure_faults: dict[tuple[str, str], MCPServerListError] = {}
+        self._tools_page_failures: dict[tuple[str, str, bool], float] = {}
+        self._tools_page_failure_faults: dict[tuple[str, str, bool], MCPServerListError] = {}
         self._upstream_initialize_instructions_by_server_id: dict[str, str] = {}
         # Per-server monotonic timestamp of last upstream prefetch attempt (success,
         # empty result, or failure). Used to throttle re-probes for servers that do
@@ -4521,9 +4521,13 @@ class MCPServerManager:
         """Cache-aware first-page tools/list.
 
         A short TTL cache with per-server single-flight turns one live listing
-        per TTL window per upstream instead of one per consumer call.
-        Continuation pages and record_listing callers bypass the cache so
-        pagination and observability semantics are unchanged.
+        per TTL window per upstream into one per consumer burst -- for listing
+        callers that are NOT running the pinned-tools guardrail. Callers that
+        pass ``proxy_logging_obj`` run the drift scan inside the live listing;
+        upstream semantics require those listings to interleave and to
+        re-evaluate drift on every call, so they bypass the cache, cooldown and
+        single-flight entirely. Continuation pages and record_listing callers
+        also bypass so pagination and observability semantics are unchanged.
 
         After a listing failure, further first-page listings for the same
         (server, identity) fail fast with the SAME classified fault for a
@@ -4535,7 +4539,13 @@ class MCPServerManager:
         ttl = _tools_listing_cache_ttl()
         cooldown = _tools_listing_failure_cooldown()
         paginated = params is not None and params.cursor is not None
-        if (ttl <= 0 and cooldown <= 0) or paginated or record_listing:
+        guardrail_path = proxy_logging_obj is not None
+        if (
+            (ttl <= 0 and cooldown <= 0)
+            or paginated
+            or record_listing
+            or guardrail_path
+        ):
             return await self._get_tools_page_uncached(
                 server=server,
                 mcp_auth_header=mcp_auth_header,
@@ -4559,7 +4569,9 @@ class MCPServerManager:
             oauth2_headers=oauth2_headers,
         )
         identity: Final = self._listed_tools_identity(server, caller) or "anon"
-        key: Final = (server.server_id, identity)
+        # Cache per (server, caller identity, prefix mode): a prefixed listing
+        # and an unprefixed one are different results for the same upstream.
+        key: Final = (server.server_id, identity, add_prefix)
 
         now = time.monotonic()
         failed_at = self._tools_page_failures.get(key)
