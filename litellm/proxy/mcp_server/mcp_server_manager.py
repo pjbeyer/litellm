@@ -2123,6 +2123,7 @@ class MCPServerManager:
         # Keyed by (server_id, caller identity); single-flight per server.
         self._tools_page_cache: dict[tuple[str, str, bool], tuple[float, ListToolsResult]] = {}
         self._tools_page_locks: dict[tuple[str, str, bool], asyncio.Lock] = {}
+        self._tools_page_lock_idle_since: dict[tuple[str, str, bool], int] = {}
         # last listing-failure state per (server_id, identity).
         # Value: monotonic failure timestamp; faults store the classified
         # MCPServerListError to re-raise unchanged during cooldown.
@@ -4571,7 +4572,14 @@ class MCPServerManager:
             raw_headers=raw_headers,
             oauth2_headers=oauth2_headers,
         )
-        identity: Final = self._listed_tools_identity(server, caller) or "anon"
+        identity = self._listed_tools_identity(server, caller) or "anon"
+        # extra_headers reach upstream too (per-user OAuth bearer refresh etc.)
+        # and can change the served catalog, so they split the cache slot.
+        if extra_headers:
+            extra_identity: Final = ",".join(
+                f"{k}={hashlib.sha256(v.encode()).hexdigest()[:16]}" for k, v in sorted(extra_headers.items())
+            )
+            identity = f"{identity}|hdr:{extra_identity}"
         # Cache per (server, caller identity, prefix mode): a prefixed listing
         # and an unprefixed one are different results for the same upstream.
         key: Final = (server.server_id, identity, add_prefix)
@@ -4585,11 +4593,22 @@ class MCPServerManager:
             ]
             for k in expired_cache:
                 self._tools_page_cache.pop(k, None)
-            expired_locks: list[tuple[str, str, bool]] = [
-                k for k, lock in self._tools_page_locks.items() if not lock.locked()
-            ]
-            for k in expired_locks:
-                self._tools_page_locks.pop(k, None)
+            # Evict only locks idle for two consecutive passes: right after a
+            # holder releases, `locked()` is false while waiters are still
+            # queued, so a single-pass check can destroy a lock with waiters.
+            idle_pass: Final = int(now)
+            idle: list[tuple[str, str, bool]] = []
+            for k, lock in self._tools_page_locks.items():
+                if lock.locked():
+                    self._tools_page_lock_idle_since.pop(k, None)
+                else:
+                    idle.append(k)
+                    if k not in self._tools_page_lock_idle_since:
+                        self._tools_page_lock_idle_since[k] = idle_pass
+            for k in idle:
+                if idle_pass - self._tools_page_lock_idle_since.get(k, idle_pass) >= 2:
+                    self._tools_page_locks.pop(k, None)
+                    self._tools_page_lock_idle_since.pop(k, None)
             expired_failures: list[tuple[str, str, bool]] = [
                 k
                 for k, failed_at in self._tools_page_failures.items()
@@ -4657,13 +4676,15 @@ class MCPServerManager:
             self._tools_page_failure_faults.pop(key, None)
             # Cache only successful, non-empty listings: a degraded upstream
             # must not pin its failure (or its empty catalog) for the window.
+            # The TTL starts when the fetch completes, not when it began, so a
+            # slow listing is not partially (or fully) expired on arrival.
             # Skip the write if the server was reconfigured while this listing
             # was in flight -- the result belongs to the old definition.
             if (
                 result.tools
                 and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
             ):
-                self._tools_page_cache[key] = (now + ttl, result)
+                self._tools_page_cache[key] = (time.monotonic() + ttl, result)
             return result
 
     async def _get_tools_page_uncached(
