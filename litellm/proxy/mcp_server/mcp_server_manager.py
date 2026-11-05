@@ -4724,6 +4724,10 @@ class MCPServerManager:
                     fault_tag not in ("auth_required", "forbidden", "internal")
                     and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
                     and env_epoch == self._tools_page_env_epochs.get(server.server_id, 0)
+                    and (
+                        (live_server := self.get_mcp_server_by_id(server.server_id)) is None
+                        or live_server is server
+                    )
                 ):
                     self._tools_page_failures[key] = time.monotonic()
                     self._tools_page_failure_faults[key] = exc
@@ -4751,7 +4755,7 @@ class MCPServerManager:
             # was in flight -- the result belongs to the old definition -- and
             # if this request still holds the pre-update server object (a stale
             # definition must not repopulate the cache under the shared ID).
-            live_server: Final = self.get_mcp_server_by_id(server.server_id)
+            live_server: Final | None = self.get_mcp_server_by_id(server.server_id)
             if (
                 result.tools
                 and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
