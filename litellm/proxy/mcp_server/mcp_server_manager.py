@@ -1186,8 +1186,27 @@ def _warn_oauth_endpoints_unresolved(
 
 def invalidate_user_env_vars_cache(user_id: str, server_id: str) -> None:
     """Drop a cached entry after the user stores or clears their env var values
-    so the next request reads the fresh value instead of a stale one."""
+    so the next request reads the fresh value instead of a stale one.
+
+    Per-user env vars interpolate into ``static_headers`` sent upstream on
+    listing, so the first-page tools/list cache for this server is dropped too:
+    its entries were produced under the old credentials and must not be served
+    for the remainder of the TTL window."""
     _user_env_vars_cache.pop((user_id, server_id), None)
+    for key in [k for k in _global_listing_cache_keys(server_id)]:
+        _drop_listing_cache_entry(key)
+
+
+def _global_listing_cache_keys(server_id: str) -> list[tuple[str, str, bool, bool]]:
+    manager: Final = global_mcp_server_manager
+    return [k for k in manager._tools_page_cache if k[0] == server_id]  # pyright: ignore[reportPrivateUsage]
+
+
+def _drop_listing_cache_entry(key: tuple[str, str, bool, bool]) -> None:
+    manager: Final = global_mcp_server_manager
+    manager._tools_page_cache.pop(key, None)  # pyright: ignore[reportPrivateUsage]
+    manager._tools_page_failures.pop(key, None)  # pyright: ignore[reportPrivateUsage]
+    manager._tools_page_failure_faults.pop(key, None)  # pyright: ignore[reportPrivateUsage]
 
 
 def _write_user_env_vars_cache(user_id: str, server_id: str, values: dict[str, str]) -> None:
