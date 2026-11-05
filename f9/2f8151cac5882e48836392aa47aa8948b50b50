@@ -1,0 +1,20 @@
+litellm/proxy/mcp_server/mcp_server_manager.py
+  s_abbb412c3bb4dc::t_5e8ea99520562e 4758
+  s_abbb412c3bb4dc::t_8da3cefa98e635 4727-4730
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "f92f8151cac5882e48836392aa47aa8948b50b50",
+  "prompts": {},
+  "sessions": {
+    "s_abbb412c3bb4dc": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261104_164328_e7a81f",
+        "model": "smart-router"
+      },
+      "human_author": null
+    }
+  }
+}
