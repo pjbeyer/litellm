@@ -2121,14 +2121,14 @@ class MCPServerManager:
         # aggregator re-lists every upstream on every search_tools call, which
         # multiplies a degraded upstream's latency into every consumer burst.
         # Keyed by (server_id, caller identity); single-flight per server.
-        self._tools_page_cache: dict[tuple[str, str, bool], tuple[float, ListToolsResult]] = {}
-        self._tools_page_locks: dict[tuple[str, str, bool], asyncio.Lock] = {}
-        self._tools_page_lock_idle_since: dict[tuple[str, str, bool], int] = {}
+        self._tools_page_cache: dict[tuple[str, str, bool, bool], tuple[float, ListToolsResult]] = {}
+        self._tools_page_locks: dict[tuple[str, str, bool, bool], asyncio.Lock] = {}
+        self._tools_page_lock_idle_since: dict[tuple[str, str, bool, bool], int] = {}
         # last listing-failure state per (server_id, identity).
         # Value: monotonic failure timestamp; faults store the classified
         # MCPServerListError to re-raise unchanged during cooldown.
-        self._tools_page_failures: dict[tuple[str, str, bool], float] = {}
-        self._tools_page_failure_faults: dict[tuple[str, str, bool], MCPServerListError] = {}
+        self._tools_page_failures: dict[tuple[str, str, bool, bool], float] = {}
+        self._tools_page_failure_faults: dict[tuple[str, str, bool, bool], MCPServerListError] = {}
         self._upstream_initialize_instructions_by_server_id: dict[str, str] = {}
         # Per-server monotonic timestamp of last upstream prefetch attempt (success,
         # empty result, or failure). Used to throttle re-probes for servers that do
@@ -4591,13 +4591,16 @@ class MCPServerManager:
             identity = f"{identity}|hdr:{extra_identity}"
         # Cache per (server, caller identity, prefix mode): a prefixed listing
         # and an unprefixed one are different results for the same upstream.
-        key: Final = (server.server_id, identity, add_prefix)
+        # Pinned tools filter the catalog, so they split the slot too: a
+        # pin-catalog fetch and a normal listing of the same server_id must
+        # not share an entry.
+        key: Final = (server.server_id, identity, add_prefix, bool(server.pinned_tools))
         # Generation read BEFORE the upstream fetch: a server reconfigured while
         # a listing is in flight must not have the stale result cached.
         listed_generation: Final = self._listed_tools_generations.get(server.server_id, 0)
 
         def _evict_expired(now: float) -> None:
-            expired_cache: list[tuple[str, str, bool]] = [
+            expired_cache: list[tuple[str, str, bool, bool]] = [
                 k for k, (deadline, _r) in self._tools_page_cache.items() if deadline <= now
             ]
             for k in expired_cache:
@@ -4605,7 +4608,7 @@ class MCPServerManager:
             # Bound per-server identity slots: caller churn must not grow the
             # cache (or the scan cost) without limit. Evict the soonest-to-expire
             # entries beyond the upstream per-server caller cap.
-            per_server: dict[str, list[tuple[float, tuple[str, str, bool]]]] = {}
+            per_server: dict[str, list[tuple[float, tuple[str, str, bool, bool]]]] = {}
             for k, (deadline, _r) in self._tools_page_cache.items():
                 per_server.setdefault(k[0], []).append((deadline, k))
             for _server_id, entries in per_server.items():
@@ -4617,7 +4620,7 @@ class MCPServerManager:
             # holder releases, `locked()` is false while waiters are still
             # queued, so a single-pass check can destroy a lock with waiters.
             idle_pass: Final = int(now)
-            idle: list[tuple[str, str, bool]] = []
+            idle: list[tuple[str, str, bool, bool]] = []
             for k, lock in self._tools_page_locks.items():
                 if lock.locked():
                     self._tools_page_lock_idle_since.pop(k, None)
@@ -4629,7 +4632,7 @@ class MCPServerManager:
                 if idle_pass - self._tools_page_lock_idle_since.get(k, idle_pass) >= 2:
                     self._tools_page_locks.pop(k, None)
                     self._tools_page_lock_idle_since.pop(k, None)
-            expired_failures: list[tuple[str, str, bool]] = [
+            expired_failures: list[tuple[str, str, bool, bool]] = [
                 k
                 for k, failed_at in self._tools_page_failures.items()
                 if failed_at <= now - max(cooldown, 0)
@@ -4680,16 +4683,29 @@ class MCPServerManager:
                 # fault (auth) must not be pinned: a corrected credential
                 # should take effect at once.
                 fault_tag = getattr(getattr(exc, "fault", None), "tag", None)
-                # auth_required/forbidden are caller-identity faults; never pin.
-                # Timestamp the failure NOW (a slow timeout consumed much of
-                # the window) and ignore faults from a server definition that
-                # was reconfigured while this listing was in flight.
+                # auth_required/forbidden are caller-identity faults; internal is
+                # a gateway fault -- neither must pin the cooldown. Timestamp
+                # the failure NOW (a slow timeout consumed much of the window)
+                # and ignore faults from a server definition that was
+                # reconfigured while this listing was in flight.
                 if (
-                    fault_tag not in ("auth_required", "forbidden")
+                    fault_tag not in ("auth_required", "forbidden", "internal")
                     and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
                 ):
                     self._tools_page_failures[key] = time.monotonic()
                     self._tools_page_failure_faults[key] = exc
+                    # Bound failure entries per server: caller churn on a
+                    # failing upstream must not retain a traceback per identity.
+                    failures_for_server: list[tuple[float, tuple[str, str, bool, bool]]] = [
+                        (ts, k) for k, ts in self._tools_page_failures.items() if k[0] == server.server_id
+                    ]
+                    if len(failures_for_server) > _LISTED_TOOLS_CALLERS_PER_SERVER:
+                        failures_for_server.sort()
+                        for _ts, k in failures_for_server[
+                            : len(failures_for_server) - _LISTED_TOOLS_CALLERS_PER_SERVER
+                        ]:
+                            self._tools_page_failures.pop(k, None)
+                            self._tools_page_failure_faults.pop(k, None)
                 raise
             # A successful listing clears any prior failure state.
             self._tools_page_failures.pop(key, None)
