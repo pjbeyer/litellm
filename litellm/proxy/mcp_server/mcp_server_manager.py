@@ -4543,7 +4543,16 @@ class MCPServerManager:
         # paginated API (first page included): its result must not be served
         # to full-list callers, so those calls bypass entirely.
         paginated = params is not None
-        guardrail_path = proxy_logging_obj is not None
+        # Bypass for callers that run the guardrail scan or the pinned-tools
+        # drift alert inside the live listing: upstream semantics require
+        # those listings to interleave and re-evaluate drift on every call.
+        # A proxy_logging_obj with NO configured guardrails (ordinary catalog
+        # listings) still uses the cache -- the callback-capability probe is
+        # cached upstream, so this check is cheap.
+        guardrail_path = proxy_logging_obj is not None and (
+            ProxyLogging.callback_capabilities().has_guardrail
+            or bool(server.pinned_tools)
+        )
         if (
             (ttl <= 0 and cooldown <= 0)
             or paginated
@@ -4593,6 +4602,17 @@ class MCPServerManager:
             ]
             for k in expired_cache:
                 self._tools_page_cache.pop(k, None)
+            # Bound per-server identity slots: caller churn must not grow the
+            # cache (or the scan cost) without limit. Evict the soonest-to-expire
+            # entries beyond the upstream per-server caller cap.
+            per_server: dict[str, list[tuple[float, tuple[str, str, bool]]]] = {}
+            for k, (deadline, _r) in self._tools_page_cache.items():
+                per_server.setdefault(k[0], []).append((deadline, k))
+            for _server_id, entries in per_server.items():
+                if len(entries) > _LISTED_TOOLS_CALLERS_PER_SERVER:
+                    entries.sort()
+                    for _deadline, k in entries[: len(entries) - _LISTED_TOOLS_CALLERS_PER_SERVER]:
+                        self._tools_page_cache.pop(k, None)
             # Evict only locks idle for two consecutive passes: right after a
             # holder releases, `locked()` is false while waiters are still
             # queued, so a single-pass check can destroy a lock with waiters.
