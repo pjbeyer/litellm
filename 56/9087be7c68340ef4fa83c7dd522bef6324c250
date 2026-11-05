@@ -1,0 +1,24 @@
+litellm/proxy/mcp_server/mcp_server_manager.py
+  s_abbb412c3bb4dc::t_6412fda45c0f2f 1196-1202
+  s_abbb412c3bb4dc::t_39bc7e5b8e268a 4643-4654
+  s_abbb412c3bb4dc::t_a74729ec1d830c 4730
+  s_abbb412c3bb4dc::t_a978996fa0bf0c 4759
+  s_abbb412c3bb4dc::t_772f5d1b4f9cdb 2158-2161
+  s_abbb412c3bb4dc::t_f61dcafbb86640 4631-4633
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "development:1.7.6",
+  "base_commit_sha": "569087be7c68340ef4fa83c7dd522bef6324c250",
+  "prompts": {},
+  "sessions": {
+    "s_abbb412c3bb4dc": {
+      "agent_id": {
+        "tool": "hermes",
+        "id": "20261104_164328_e7a81f",
+        "model": "smart-router"
+      },
+      "human_author": "Phil Beyer <6152278+pjbeyer@users.noreply.github.com>"
+    }
+  }
+}
