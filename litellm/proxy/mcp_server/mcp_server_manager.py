@@ -2122,7 +2122,7 @@ class MCPServerManager:
         # multiplies a degraded upstream's latency into every consumer burst.
         # Keyed by (server_id, caller identity); single-flight per server.
         self._tools_page_cache: dict[tuple[str, str, bool], tuple[float, ListToolsResult]] = {}
-        self._tools_page_locks: dict[str, asyncio.Lock] = {}
+        self._tools_page_locks: dict[tuple[str, str, bool], asyncio.Lock] = {}
         # last listing-failure state per (server_id, identity).
         # Value: monotonic failure timestamp; faults store the classified
         # MCPServerListError to re-raise unchanged during cooldown.
@@ -4572,8 +4572,19 @@ class MCPServerManager:
         # Cache per (server, caller identity, prefix mode): a prefixed listing
         # and an unprefixed one are different results for the same upstream.
         key: Final = (server.server_id, identity, add_prefix)
+        # Generation read BEFORE the upstream fetch: a server reconfigured while
+        # a listing is in flight must not have the stale result cached.
+        listed_generation: Final = self._listed_tools_generations.get(server.server_id, 0)
+
+        def _evict_expired(now: float) -> None:
+            expired: list[tuple[str, str, bool]] = [
+                k for k, (deadline, _r) in self._tools_page_cache.items() if deadline <= now
+            ]
+            for k in expired:
+                self._tools_page_cache.pop(k, None)
 
         now = time.monotonic()
+        _evict_expired(now)
         failed_at = self._tools_page_failures.get(key)
         if cooldown > 0 and failed_at is not None and failed_at > now - cooldown:
             raise self._tools_page_failure_faults[key]
@@ -4582,8 +4593,9 @@ class MCPServerManager:
         if cached is not None and cached[0] > now:
             return cached[1]
 
-        # Single-flight per server: one live listing, waiters re-check the cache.
-        lock = self._tools_page_locks.setdefault(server.server_id, asyncio.Lock())
+        # Single-flight per cache key (not per server): callers with different
+        # identities cannot share a result, so they must not serialize.
+        lock = self._tools_page_locks.setdefault(key, asyncio.Lock())
         async with lock:
             now = time.monotonic()
             failed_at = self._tools_page_failures.get(key)
@@ -4623,7 +4635,12 @@ class MCPServerManager:
             self._tools_page_failure_faults.pop(key, None)
             # Cache only successful, non-empty listings: a degraded upstream
             # must not pin its failure (or its empty catalog) for the window.
-            if result.tools:
+            # Skip the write if the server was reconfigured while this listing
+            # was in flight -- the result belongs to the old definition.
+            if (
+                result.tools
+                and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
+            ):
                 self._tools_page_cache[key] = (now + ttl, result)
             return result
 
