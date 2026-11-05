@@ -1193,6 +1193,13 @@ def invalidate_user_env_vars_cache(user_id: str, server_id: str) -> None:
     its entries were produced under the old credentials and must not be served
     for the remainder of the TTL window."""
     _user_env_vars_cache.pop((user_id, server_id), None)
+    # Advance the server's env-var epoch: a listing already in flight read the
+    # old credentials, and its result (or fault) must not be cached once the
+    # epoch has moved. In-flight listings also keep their generation, so the
+    # epoch -- not just the generation -- guards the cache write.
+    global_mcp_server_manager._tools_page_env_epochs[server_id] = (  # pyright: ignore[reportPrivateUsage]
+        global_mcp_server_manager._tools_page_env_epochs.get(server_id, 0) + 1  # pyright: ignore[reportPrivateUsage]
+    )
     for key in [k for k in _global_listing_cache_keys(server_id)]:
         _drop_listing_cache_entry(key)
 
@@ -2148,6 +2155,10 @@ class MCPServerManager:
         # MCPServerListError to re-raise unchanged during cooldown.
         self._tools_page_failures: dict[tuple[str, str, bool, bool], float] = {}
         self._tools_page_failure_faults: dict[tuple[str, str, bool, bool], MCPServerListError] = {}
+        # Per-server epoch advanced when a user's per-user env vars change: an
+        # in-flight listing that read the old credentials must not cache its
+        # result once the epoch has moved.
+        self._tools_page_env_epochs: dict[str, int] = {}
         self._upstream_initialize_instructions_by_server_id: dict[str, str] = {}
         # Per-server monotonic timestamp of last upstream prefetch attempt (success,
         # empty result, or failure). Used to throttle re-probes for servers that do
@@ -4617,6 +4628,9 @@ class MCPServerManager:
         # Generation read BEFORE the upstream fetch: a server reconfigured while
         # a listing is in flight must not have the stale result cached.
         listed_generation: Final = self._listed_tools_generations.get(server.server_id, 0)
+        # Env-var epoch read BEFORE the fetch: a user's per-user env vars
+        # changing mid-listing must likewise invalidate the result.
+        env_epoch: Final = self._tools_page_env_epochs.get(server.server_id, 0)
 
         def _evict_expired(now: float) -> None:
             expired_cache: list[tuple[str, str, bool, bool]] = [
@@ -4626,15 +4640,18 @@ class MCPServerManager:
                 self._tools_page_cache.pop(k, None)
             # Bound per-server identity slots: caller churn must not grow the
             # cache (or the scan cost) without limit. Evict the soonest-to-expire
-            # entries beyond the upstream per-server caller cap.
-            per_server: dict[str, list[tuple[float, tuple[str, str, bool, bool]]]] = {}
-            for k, (deadline, _r) in self._tools_page_cache.items():
-                per_server.setdefault(k[0], []).append((deadline, k))
-            for _server_id, entries in per_server.items():
-                if len(entries) > _LISTED_TOOLS_CALLERS_PER_SERVER:
-                    entries.sort()
-                    for _deadline, k in entries[: len(entries) - _LISTED_TOOLS_CALLERS_PER_SERVER]:
-                        self._tools_page_cache.pop(k, None)
+            # entries beyond the upstream per-server caller cap. Scoped to THIS
+            # server's entries only: an aggregate listing across many servers
+            # must not rescan the process-wide cache per server.
+            server_entries: list[tuple[float, tuple[str, str, bool, bool]]] = [
+                (deadline, k)
+                for k, (deadline, _r) in self._tools_page_cache.items()
+                if k[0] == server.server_id
+            ]
+            if len(server_entries) > _LISTED_TOOLS_CALLERS_PER_SERVER:
+                server_entries.sort()
+                for _deadline, k in server_entries[: len(server_entries) - _LISTED_TOOLS_CALLERS_PER_SERVER]:
+                    self._tools_page_cache.pop(k, None)
             # Evict only locks idle for two consecutive passes: right after a
             # holder releases, `locked()` is false while waiters are still
             # queued, so a single-pass check can destroy a lock with waiters.
@@ -4710,6 +4727,7 @@ class MCPServerManager:
                 if (
                     fault_tag not in ("auth_required", "forbidden", "internal")
                     and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
+                    and env_epoch == self._tools_page_env_epochs.get(server.server_id, 0)
                 ):
                     self._tools_page_failures[key] = time.monotonic()
                     self._tools_page_failure_faults[key] = exc
@@ -4738,6 +4756,7 @@ class MCPServerManager:
             if (
                 result.tools
                 and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
+                and env_epoch == self._tools_page_env_epochs.get(server.server_id, 0)
             ):
                 self._tools_page_cache[key] = (time.monotonic() + ttl, result)
             return result
