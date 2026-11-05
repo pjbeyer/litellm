@@ -1200,20 +1200,16 @@ def invalidate_user_env_vars_cache(user_id: str, server_id: str) -> None:
     global_mcp_server_manager._tools_page_env_epochs[server_id] = (  # pyright: ignore[reportPrivateUsage]
         global_mcp_server_manager._tools_page_env_epochs.get(server_id, 0) + 1  # pyright: ignore[reportPrivateUsage]
     )
-    for key in [k for k in _global_listing_cache_keys(server_id)]:
-        _drop_listing_cache_entry(key)
-
-
-def _global_listing_cache_keys(server_id: str) -> list[tuple[str, str, bool, bool]]:
+    # Drop cached listings AND pinned failure cooldowns for this server: a
+    # credential update may be exactly what fixes a pinned failure, and the
+    # cooldown must not keep re-raising the stale fault. Failure keys do not
+    # necessarily have a live cache entry, so enumerate them independently.
     manager: Final = global_mcp_server_manager
-    return [k for k in manager._tools_page_cache if k[0] == server_id]  # pyright: ignore[reportPrivateUsage]
-
-
-def _drop_listing_cache_entry(key: tuple[str, str, bool, bool]) -> None:
-    manager: Final = global_mcp_server_manager
-    manager._tools_page_cache.pop(key, None)  # pyright: ignore[reportPrivateUsage]
-    manager._tools_page_failures.pop(key, None)  # pyright: ignore[reportPrivateUsage]
-    manager._tools_page_failure_faults.pop(key, None)  # pyright: ignore[reportPrivateUsage]
+    for key in [k for k in manager._tools_page_cache if k[0] == server_id]:  # pyright: ignore[reportPrivateUsage]
+        manager._tools_page_cache.pop(key, None)  # pyright: ignore[reportPrivateUsage]
+    for key in [k for k in manager._tools_page_failures if k[0] == server_id]:  # pyright: ignore[reportPrivateUsage]
+        manager._tools_page_failures.pop(key, None)  # pyright: ignore[reportPrivateUsage]
+        manager._tools_page_failure_faults.pop(key, None)  # pyright: ignore[reportPrivateUsage]
 
 
 def _write_user_env_vars_cache(user_id: str, server_id: str, values: dict[str, str]) -> None:
@@ -4752,11 +4748,15 @@ class MCPServerManager:
             # The TTL starts when the fetch completes, not when it began, so a
             # slow listing is not partially (or fully) expired on arrival.
             # Skip the write if the server was reconfigured while this listing
-            # was in flight -- the result belongs to the old definition.
+            # was in flight -- the result belongs to the old definition -- and
+            # if this request still holds the pre-update server object (a stale
+            # definition must not repopulate the cache under the shared ID).
+            live_server: Final = self.get_mcp_server_by_id(server.server_id)
             if (
                 result.tools
                 and listed_generation == self._listed_tools_generations.get(server.server_id, 0)
                 and env_epoch == self._tools_page_env_epochs.get(server.server_id, 0)
+                and (live_server is None or live_server is server)
             ):
                 self._tools_page_cache[key] = (time.monotonic() + ttl, result)
             return result
